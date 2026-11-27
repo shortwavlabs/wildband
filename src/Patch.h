@@ -7,9 +7,14 @@
 // docs/p0/TALORA-REUSE.md. tests/TaloraParity.cpp checks this Graph against the real one when TALORA is on disk.
 #pragma once
 
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <string>
 
 namespace wildband
 {
@@ -67,15 +72,21 @@ inline int findPort (const char* id) noexcept
 
 // TALORA's ConnectError names. Cycle and Reserved are absent: no WILDBAND module has both inputs and outputs, and
 // there are no reserved ports, so neither can occur with this registry.
-enum class ConnectError : uint8_t { None, UnknownPort, OutputToOutput, InputToInput, Reversed, TypeMismatch, FanIn, FanOut, SelfConnection, Duplicate, Full, NotConnected };
+// NoDepth is WILDBAND's own addition (appended, so the shared values keep their numbers): a depth was given for a
+// cable that cannot have one.
+enum class ConnectError : uint8_t { None, UnknownPort, OutputToOutput, InputToInput, Reversed, TypeMismatch, FanIn, FanOut, SelfConnection, Duplicate, Full, NotConnected, NoDepth };
 inline const char* describe (ConnectError e) noexcept
 {
     static constexpr const char* text[] = { "ok", "unknown port", "two outputs", "two inputs", "drag from an output to an input",
-        "audio and control signals do not mix", "that input already has a cable", "that output is full", "same module", "already connected", "no free cables", "not connected" };
+        "audio and control signals do not mix", "that input already has a cable", "that output is full", "same module", "already connected", "no free cables", "not connected", "audio cables have no depth" };
     return text[(int) e];
 }
 
-struct Connection { int8_t from = -1, to = -1; };
+/** A cable. `depth` is the attenuverter of a control cable: -1 .. +1, where +1 is the original behaviour, 0 is no
+    influence and negative values reverse it. Audio cables always carry +1 (they have no depth). */
+struct Connection { int8_t from = -1, to = -1; float depth = 1.0f; };
+
+inline float validDepth (float depth) noexcept { return std::isfinite (depth) ? std::min (1.0f, std::max (-1.0f, depth)) : 1.0f; }
 
 /** The patch. A fixed-size value: copying or editing one never allocates. Edited on the message thread only. */
 class Graph
@@ -102,11 +113,29 @@ public:
         if (count == kMaxConnections) return ConnectError::Full;
         return ConnectError::None;
     }
-    ConnectError connect (int from, int to) noexcept
+    ConnectError connect (int from, int to, float depth = 1.0f) noexcept
     {
         const auto e = check (from, to);
-        if (e == ConnectError::None) conns[count++] = { (int8_t) from, (int8_t) to };
+        if (e == ConnectError::None) conns[count++] = { (int8_t) from, (int8_t) to, ports[to].type == PortType::CV ? validDepth (depth) : 1.0f };
         return e;
+    }
+    /** Sets a control cable's depth (clamped to -1 .. +1). Non-finite values and audio cables are refused. */
+    ConnectError setDepth (int from, int to, float depth) noexcept
+    {
+        for (int i = 0; i < count; ++i)
+            if (conns[i].from == from && conns[i].to == to)
+            {
+                if (ports[to].type != PortType::CV || ! std::isfinite (depth)) return ConnectError::NoDepth;
+                conns[i].depth = validDepth (depth);
+                return ConnectError::None;
+            }
+        return ConnectError::NotConnected;
+    }
+    /** Depth of the cable into `input`; +1 if there is none. */
+    float depthInto (int input) const noexcept
+    {
+        for (int i = 0; i < count; ++i) if (conns[i].to == input) return conns[i].depth;
+        return 1.0f;
     }
     ConnectError disconnect (int from, int to) noexcept
     {
@@ -147,22 +176,90 @@ private:
     int count = 0;
 };
 
-/** What the audio thread runs: the source port of each input, -1 = nothing plugged in. Seven bytes of plain data, so
-    it travels in one atomic word (TALORA's larger plan uses a triple buffer; the hand-off is wait-free either way). */
+/** What the audio thread runs: for each input, the port plugged into it (-1 = nothing) and that cable's depth.
+    Plain data, built from a validated Graph off the audio thread. */
 struct RoutingPlan
 {
     int8_t source[kNumInputs] = { -1, -1, -1, -1, -1, -1, -1 };
+    float depth[kNumInputs] = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
 
     static RoutingPlan fromGraph (const Graph& g) noexcept
     {
         RoutingPlan p;
-        for (int i = 0; i < kNumInputs; ++i) p.source[i] = (int8_t) g.cableInto (kFirstInput + i);
+        for (int i = 0; i < kNumInputs; ++i)
+        {
+            p.source[i] = (int8_t) g.cableInto (kFirstInput + i);
+            p.depth[i] = g.depthInto (kFirstInput + i);
+        }
         return p;
     }
     int sourceOf (int input) const noexcept { return source[input - kFirstInput]; }
-    uint64_t pack() const noexcept { uint64_t v = 0; std::memcpy (&v, source, sizeof (source)); return v; }
-    static RoutingPlan unpack (uint64_t v) noexcept { RoutingPlan p; std::memcpy (p.source, &v, sizeof (p.source)); return p; }
+    float depthOf (int input) const noexcept { return depth[input - kFirstInput]; }
 };
-static_assert (sizeof (RoutingPlan::source) <= sizeof (uint64_t));
+
+/** Hands the latest plan from one writer thread (the UI) to one reader thread (audio), whole: a reader never sees one
+    cable's source with another plan's depth. Wait-free on both sides, no allocation. This is the standard three-slot
+    "latest value" exchange (TALORA hands its plans over the same way); with depths the plan no longer fits in the
+    single atomic word P0 used. */
+class PlanMailbox
+{
+public:
+    /** Writer thread only. */
+    void publish (const RoutingPlan& plan) noexcept
+    {
+        slots[back] = plan;
+        back = middle.exchange (back | kFresh, std::memory_order_acq_rel) & kIndex;
+    }
+    /** Reader thread only: the most recently published plan. */
+    const RoutingPlan& read() noexcept
+    {
+        if ((middle.load (std::memory_order_relaxed) & kFresh) != 0)
+            front = middle.exchange (front, std::memory_order_acq_rel) & kIndex;
+        return slots[front];
+    }
+
+private:
+    static constexpr int kIndex = 3, kFresh = 4;
+    RoutingPlan slots[3];
+    std::atomic<int> middle { 1 };
+    int back = 0, front = 2;      // owned by the writer / by the reader
+};
+
+// ---- persistence: "from|to|depth;from|to|depth;..." using port ids. The depth is optional, so patches saved before
+// depths existed ("from|to") load at +1. Anything invalid is dropped or corrected; the result is always a valid Graph.
+inline std::string savePatch (const Graph& g)
+{
+    std::string text;
+    for (int i = 0; i < g.size(); ++i)
+    {
+        char depth[32];
+        std::snprintf (depth, sizeof (depth), "%.4f", (double) g[i].depth);
+        text += std::string (i ? ";" : "") + ports[g[i].from].id + "|" + ports[g[i].to].id + "|" + depth;
+    }
+    return text;
+}
+
+inline Graph loadPatch (const std::string& text)
+{
+    Graph g;
+    for (size_t at = 0; at <= text.size();)
+    {
+        const size_t end = std::min (text.find (';', at), text.size());
+        const std::string cable = text.substr (at, end - at);
+        at = end + 1;
+        const size_t bar1 = cable.find ('|'), bar2 = bar1 == std::string::npos ? bar1 : cable.find ('|', bar1 + 1);
+        if (bar1 == std::string::npos) continue;
+        const std::string from = cable.substr (0, bar1), to = cable.substr (bar1 + 1, bar2 == std::string::npos ? bar2 : bar2 - bar1 - 1);
+        float depth = 1.0f;
+        if (bar2 != std::string::npos)
+        {
+            char* parsed = nullptr;
+            const double value = std::strtod (cable.c_str() + bar2 + 1, &parsed);
+            if (parsed != cable.c_str() + bar2 + 1) depth = validDepth ((float) value);     // unreadable: keep +1
+        }
+        g.connect (findPort (from.c_str()), findPort (to.c_str()), depth);                  // every rule of connect() applies
+    }
+    return g;
+}
 
 } // namespace wildband

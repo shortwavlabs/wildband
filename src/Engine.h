@@ -339,8 +339,8 @@ private:
         detuneT = clamp01 (c.detune);
         for (int m = 0; m < 3; ++m) modeT[m] = (int) c.mode == m ? 1.0f : 0.0f;
 
-        // ---- the patch: each input reads the output plugged into it, or nothing. The plan arrives as an atomic word
-        // from another thread, so every index is range-checked here.
+        // ---- the patch: each input reads the output plugged into it, scaled by that cable's signed depth, or nothing.
+        // The plan comes from another thread, so every index and depth is checked here.
         const float cv[kNumCvOuts] = { radioLevel(), radioActivity(), clamp01 (c.room.level), clamp01 (c.room.activity), clamp01 (c.room.brightness) };
         const int audioSource = c.plan.sourceOf (kResAudioIn);
         srcT[0] = audioSource == kRadioAudioOut ? 1.0f : 0.0f;
@@ -350,8 +350,9 @@ private:
             const int from = c.plan.sourceOf (in);
             const bool plugged = from >= kFirstCvOut && from < kFirstInput;
             auto& m = mod[(size_t) (in - kFirstInput)];
-            m += aMod * ((plugged ? cv[from - kFirstCvOut] : 0.0f) - m);     // glides in and out when a cable moves
-            if (in == kResExciteIn) strikePlugged += aMod * ((plugged ? 1.0f : 0.0f) - strikePlugged);
+            const float depth = plugged ? validDepth (c.plan.depthOf (in)) : 0.0f;
+            m += aMod * (depth * (plugged ? cv[from - kFirstCvOut] : 0.0f) - m);     // signed; glides when a cable or its depth moves
+            if (in == kResExciteIn) strikePlugged += aMod * (std::max (0.0f, depth) - strikePlugged);
         }
         auto cvIn = [this] (int in) { return mod[(size_t) (in - kFirstInput)]; };
         const float cpl = pt[kCouple], drift = pt[kDrift];
@@ -361,11 +362,14 @@ private:
         const int set = std::min (2, (int) shape);
         const float frac = shape - (float) set;
         const float dt = (float) kControlInterval / (float) fs;
+        // (the positive branch is written exactly as P0 wrote it, so +100 % stays bit-identical)
+        const float driftCv = cvIn (kResDriftIn), driftRate = driftCv >= 0.0f ? (1.0f + 3.0f * cpl * driftCv) : 1.0f / (1.0f - 3.0f * cpl * driftCv);
         for (int i = 0; i < kLines; ++i)
         {
             const auto k = (size_t) i;
-            // DRIFT: six slow phases, each bending its neighbour's; the DRIFT input makes them run faster.
-            driftPhase[k] += 2.0f * kPi * dt * kDriftRates[k] * (0.05f + 1.5f * drift) * (1.0f + 3.0f * cpl * cvIn (kResDriftIn));
+            // DRIFT: six slow phases, each bending its neighbour's; the DRIFT input makes them run up to 4x faster,
+            // or with negative depth up to 4x slower (never backwards).
+            driftPhase[k] += 2.0f * kPi * dt * kDriftRates[k] * (0.05f + 1.5f * drift) * driftRate;
             if (driftPhase[k] > 2.0f * kPi) driftPhase[k] -= 2.0f * kPi;
         }
         for (int i = 0; i < kLines; ++i)
@@ -373,17 +377,18 @@ private:
             const auto k = (size_t) i;
             const float ratio = std::exp ((1.0f - frac) * std::log (kRatios[set][k]) + frac * std::log (kRatios[set + 1][k]));
             const float cents = 200.0f * drift * drift * std::sin (driftPhase[k] + 0.8f * std::sin (driftPhase[(k + 1) % kLines]))
-                              + 100.0f * cpl * cvIn (kResPitchIn);                        // PITCH input: up to a semitone sharp
+                              + 100.0f * cpl * cvIn (kResPitchIn);                        // PITCH input: up to a semitone sharp, or flat
             freqT[k] = std::min (std::min (6000.0f, (float) fs * 0.2f), std::max (20.0f, rootHz * ratio * std::exp2 (cents / 1200.0f)));
         }
-        const float cutoff = std::min ((float) fs * 0.45f, 200.0f * std::exp2 (6.3f * pt[kTone] + 3.0f * cpl * cvIn (kResDampIn)));
+        const float cutoff = std::max (60.0f, std::min ((float) fs * 0.45f, 200.0f * std::exp2 (6.3f * pt[kTone] + 3.0f * cpl * cvIn (kResDampIn))));   // negative depth closes it
         dampT = 1.0f - std::exp (-2.0f * kPi * cutoff / (float) fs);
         const float fb = 1.0f - pt[kFeedback];
-        gainT = std::min (1.25f, 1.1f * (1.0f - fb * fb) + 0.2f * cpl * cvIn (kResFeedbackIn)); // unity loop gain near FEEDBACK 0.7
+        gainT = std::max (0.0f, std::min (1.25f, 1.1f * (1.0f - fb * fb) + 0.2f * cpl * cvIn (kResFeedbackIn))); // unity loop gain near FEEDBACK 0.7
         coupleT = 0.45f * drift;
-        // STRIKE input: with a cable in it the steady excitation backs off and the control signal strikes the resonators
+        // STRIKE input. Positive depth: the steady excitation backs off (in proportion to the depth) and the control
+        // signal strikes the resonators. Negative depth: the steady excitation stays and the signal ducks it.
         const float strike = cpl * strikePlugged;
-        exciteT = 0.5f * ((1.0f - 0.7f * strike) + 5.0f * cpl * cvIn (kResExciteIn));
+        exciteT = std::max (0.0f, 0.5f * ((1.0f - 0.7f * strike) + 5.0f * cpl * cvIn (kResExciteIn)));
         const float g2 = gainT * gainT;
         wetGainT = 1.0f / (1.0f + 2.0f * g2 * g2 * g2);                                  // keeps loudness roughly level as the loop closes
     }

@@ -1,12 +1,14 @@
 // WILDBAND P0 engine tests. Plain checks, no framework; exit code = number of failed checks.
 // `wildband_tests --metrics` also prints level/brightness figures for a few control states (proxies, not listening).
 #include "../src/Engine.h"
+#include "baseline/Engine.h"   // the auditioned engine, frozen: reference for depth +100 %
 
 #include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <pthread.h>
 #include <random>
+#include <thread>
 
 using namespace wildband;
 
@@ -39,6 +41,19 @@ Buf run (Engine& e, const Buf& x, const Controls& c, int block)
     }
     for (size_t i = 0; i < x.size(); ++i) { out[2 * i] = l[i]; out[2 * i + 1] = r[i]; }
     return out;
+}
+
+/** A plan nobody would build: arbitrary sources and depths, including NaN, infinity and huge values. */
+RoutingPlan garbagePlan (std::mt19937& rng)
+{
+    RoutingPlan p;
+    static const float nasty[] = { std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), 1.0e30f, -1.0e30f, -1.0f, 1.0f, 0.0f };
+    for (int i = 0; i < kNumInputs; ++i)
+    {
+        p.source[i] = (int8_t) (rng() & 0xff);
+        p.depth[i] = rng() % 3 == 0 ? nasty[rng() % 8] : (float) (rng() % 4001) / 1000.0f - 2.0f;
+    }
+    return p;
 }
 
 Buf noise (size_t n, float amp, unsigned seed = 1)
@@ -109,7 +124,13 @@ void testBounded()
             c.mode = (Mode) (trial % 3);
             c.detune = u (rng);
             c.room = { u (rng) * 3.0f, u (rng) * 3.0f, u (rng) * 3.0f };             // out-of-range room values too
-            if (trial % 4 == 3) c.plan = RoutingPlan::unpack (((uint64_t) rng() << 32) | rng());   // garbage plan words too
+            if (trial % 4 == 3) c.plan = garbagePlan (rng);                          // garbage plans too
+            else if (trial % 4 == 1)                                                // AT-08: every destination at -1 or +1
+            {
+                Graph g = Graph::defaultPatch();
+                for (int in = kResPitchIn; in < kNumPorts; ++in) g.setDepth (g.cableInto (in), in, trial % 8 == 1 ? -1.0f : 1.0f);
+                c.plan = RoutingPlan::fromGraph (g);
+            }
             Engine e;
             e.prepare (fs);
             const auto y = run (e, nasty, c, trial % 2 ? 0 : 64);
@@ -126,6 +147,10 @@ void testDeterministicAndBlockInvariant()
     const auto x = testSource (48000.0, 48000 * 3);
     auto c = defaults();
     c.p[kDrift] = 0.8f; c.p[kCouple] = 0.9f; c.p[kFeedback] = 0.85f; c.room = { 0.5f, 0.3f, 0.6f }; c.detune = 0.4f;
+    Graph depths = Graph::defaultPatch();                                           // AT-08: with mixed signed depths
+    const float mixed[] = { -1.0f, 0.4f, -0.6f, 1.0f, -0.25f, 0.8f };
+    for (int in = kResPitchIn; in < kNumPorts; ++in) depths.setDepth (depths.cableInto (in), in, mixed[in - kResPitchIn]);
+    c.plan = RoutingPlan::fromGraph (depths);
     Buf ref;
     for (int block : { 1, 64, 1000, 0 })
     {
@@ -293,7 +318,6 @@ void testGraph()
 
     const auto plan = RoutingPlan::fromGraph (g);
     CHECK (plan.sourceOf (kResDampIn) == kRoomLevelOut && plan.sourceOf (kResAudioIn) == -1);
-    CHECK (std::memcmp (RoutingPlan::unpack (plan.pack()).source, plan.source, sizeof (plan.source)) == 0);
     for (int p = 0; p < kNumPorts; ++p) CHECK (findPort (ports[p].id) == p);
     CHECK (findPort ("resonator.nope") == -1);
     CHECK (Graph::defaultPatch().size() == 7);
@@ -394,6 +418,8 @@ void testNoAllocation()
     const auto x = noise (64, 0.5f);
     Buf l (64), r (64);
     auto c = defaults();
+    PlanMailbox mail;
+    std::mt19937 rng (9);
     watched = pthread_self();
     malloc_logger = countAllocs;
     { void* volatile p = std::malloc (64); std::free (p); }                         // positive control
@@ -405,13 +431,373 @@ void testNoAllocation()
         bus.publish (kEnvMicrophone, room.process (x.data(), 64), b);
         c.room = bus.read (b);
         e.process (x.data(), x.data(), x.data(), l.data(), r.data(), 64, c);
-        if (b % 300 == 0) c.plan = RoutingPlan::unpack ((uint64_t) b * 0x9E3779B97F4A7C15ull); // any word at all is a safe plan
+        if (b % 300 == 0) mail.publish (garbagePlan (rng));                           // AT-10: plans published and read here too
+        c.plan = mail.read();
         if (b == 2000) e.reset();
     }
     malloc_logger = nullptr;
     CHECK (control == 1);
     CHECK (allocs.load() == 0);
 }
+
+
+// =====================================================================================================================
+// Per-connection depth (attenuverter) acceptance tests: docs/p0/ATTENUVERTER-ACCEPTANCE.md
+namespace depth
+{
+using Cable = std::pair<int, int>;
+template <typename G> G wire (std::initializer_list<Cable> cables) { G g; for (auto c : cables) g.connect (c.first, c.second); return g; }
+const std::initializer_list<Cable> kAudio = { { kRadioAudioOut, kResAudioIn } };
+
+struct Run { Buf out; std::vector<float> f0, f1; };
+
+/** Radio = pings and bursts plus hiss; local = other noise. `track`: also record resonator frequencies per block. */
+Run render (const RoutingPlan& plan, Controls c, double fs = 48000.0, double seconds = 2.0, double inputSeconds = 1.0e9)
+{
+    const size_t n = (size_t) (fs * seconds);
+    auto radio = testSource (fs, n);
+    const auto hiss = noise (n, 0.05f), local = noise (n, 0.2f, 5);
+    for (size_t i = 0; i < n; ++i) radio[i] = (double) i < inputSeconds * fs ? radio[i] + hiss[i] : 0.0f;
+    c.plan = plan;
+    Engine e;
+    e.prepare (fs);
+    Run r;
+    r.out.resize (n * 2);
+    Buf l (64), rr (64);
+    for (size_t at = 0; at + 64 <= n; at += 64)
+    {
+        e.process (radio.data() + at, radio.data() + at, local.data() + at, l.data(), rr.data(), 64, c);
+        for (size_t i = 0; i < 64; ++i) { r.out[2 * (at + i)] = l[i]; r.out[2 * (at + i) + 1] = rr[i]; }
+        r.f0.push_back (e.lineFrequency (0));
+        r.f1.push_back (e.lineFrequency (1));
+    }
+    return r;
+}
+bool same (const Buf& a, const Buf& b) { return a.size() == b.size() && std::memcmp (a.data(), b.data(), a.size() * sizeof (float)) == 0; }
+RoutingPlan plan (Graph g) { return RoutingPlan::fromGraph (g); }
+Graph with (Graph g, int from, int to, float depth) { g.connect (from, to, depth); return g; }
+
+Controls loud()
+{
+    auto c = defaults();
+    c.p[kCouple] = 1.0f; c.p[kDrift] = 0.0f;
+    c.room = { 1.0f, 1.0f, 1.0f };
+    return c;
+}
+
+void legacyParity()   // AT-01
+{
+    currentTest = "AT-01 legacy parity";
+    namespace base = wildband_baseline;
+    const std::initializer_list<Cable> patches[] = {
+        { { kRadioAudioOut, kResAudioIn }, { kRadioActivityOut, kResExciteIn }, { kRadioLevelOut, kResDampIn }, { kRadioLevelOut, kResDriftIn },
+          { kRoomLevelOut, kResFeedbackIn }, { kRoomActivityOut, kResPitchIn }, { kRoomBrightnessOut, kResShapeIn } },                       // the default patch
+        { { kLocalAudioOut, kResAudioIn }, { kRoomLevelOut, kResPitchIn }, { kRoomLevelOut, kResShapeIn }, { kRoomLevelOut, kResDampIn },
+          { kRoomLevelOut, kResExciteIn }, { kRoomLevelOut, kResDriftIn }, { kRoomLevelOut, kResFeedbackIn } },                              // one source everywhere
+        { { kRadioAudioOut, kResAudioIn } } };
+    std::mt19937 rng (21);
+    std::uniform_real_distribution<float> u (0.0f, 1.0f);
+    int compared = 0;
+    for (double fs : { 44100.0, 48000.0, 96000.0 })
+        for (const auto& cables : patches)
+            for (int state = 0; state < 4; ++state)
+            {
+                Controls c = defaults();
+                base::Controls b;
+                if (state > 0) for (auto& p : c.p) p = state == 1 ? 1.0f : u (rng);
+                c.mode = (Mode) (state % 3);
+                c.detune = state * 0.3f;
+                c.room = { u (rng), u (rng), u (rng) };
+                for (int i = 0; i < kNumParams; ++i) b.p[i] = c.p[i];
+                b.mode = (base::Mode) (int) c.mode; b.detune = c.detune; b.room = { c.room.level, c.room.activity, c.room.brightness };
+                c.plan = RoutingPlan::fromGraph (wire<Graph> (cables));                                // every depth +1
+                b.plan = base::RoutingPlan::fromGraph (wire<base::Graph> (cables));
+
+                const size_t n = (size_t) fs;
+                const auto radio = testSource (fs, n), local = noise (n, 0.2f, 5);
+                Engine now;
+                base::Engine then;
+                now.prepare (fs);
+                then.prepare (fs);
+                Buf l1 (n), r1 (n), l2 (n), r2 (n);
+                for (size_t at = 0; at + 128 <= n; at += 128)
+                {
+                    now.process (radio.data() + at, radio.data() + at, local.data() + at, l1.data() + at, r1.data() + at, 128, c);
+                    then.process (radio.data() + at, radio.data() + at, local.data() + at, l2.data() + at, r2.data() + at, 128, b);
+                }
+                CHECK (same (l1, l2) && same (r1, r2));
+                ++compared;
+            }
+    CHECK (compared == 36);
+}
+
+void persistence()   // AT-02, AT-12
+{
+    currentTest = "AT-02 migrated patch";
+    const Graph old = loadPatch ("radio.audio_out|resonator.audio_in;radio.activity_out|resonator.excite_cv_in;radio.level_out|resonator.damp_cv_in;"
+                                 "radio.level_out|resonator.drift_cv_in;room.level_out|resonator.feedback_cv_in;room.activity_out|resonator.pitch_cv_in;"
+                                 "room.brightness_out|resonator.shape_cv_in");                    // exactly what P0 wrote for the default patch
+    CHECK (old.size() == 7);
+    const auto a = RoutingPlan::fromGraph (old), b = RoutingPlan::fromGraph (Graph::defaultPatch());
+    for (int i = 0; i < kNumInputs; ++i) CHECK (a.source[i] == b.source[i] && a.depth[i] == 1.0f && b.depth[i] == 1.0f);
+
+    Graph g = Graph::defaultPatch();
+    g.setDepth (kRoomLevelOut, kResFeedbackIn, -0.5f);
+    g.setDepth (kRadioLevelOut, kResDampIn, 0.25f);
+    g.setDepth (kRadioLevelOut, kResDriftIn, 0.0f);
+    const Graph back = loadPatch (savePatch (g));                                                 // round trip keeps depths
+    CHECK (back.size() == 7 && back.depthInto (kResFeedbackIn) == -0.5f && back.depthInto (kResDampIn) == 0.25f && back.depthInto (kResDriftIn) == 0.0f && back.depthInto (kResPitchIn) == 1.0f);
+
+    currentTest = "AT-12 malformed state";
+    const char* bad[] = {
+        "", ";;;", "|", "||", "garbage", "radio.audio_out", "radio.audio_out|", "|resonator.audio_in", "nope|resonator.audio_in|0.5",
+        "radio.level_out|resonator.damp_cv_in|nan", "radio.level_out|resonator.damp_cv_in|inf", "radio.level_out|resonator.damp_cv_in|-inf",
+        "radio.level_out|resonator.damp_cv_in|1e30", "radio.level_out|resonator.damp_cv_in|-7", "radio.level_out|resonator.damp_cv_in|abc",
+        "radio.level_out|resonator.damp_cv_in|", "radio.level_out|resonator.damp_cv_in|0.5|extra|stuff",
+        "radio.audio_out|resonator.audio_in|-1",                                                    // a depth on an audio cable
+        "radio.level_out|resonator.damp_cv_in|0.3;room.level_out|resonator.damp_cv_in|0.9",          // second cable into the same input
+        "radio.level_out|resonator.damp_cv_in|0.3;radio.level_out|resonator.damp_cv_in|0.9",          // duplicate
+        "radio.audio_out|resonator.damp_cv_in|0.5", "resonator.audio_in|radio.audio_out|0.5",        // type mismatch, reversed
+        "radio.level_out|resonator.pitch_cv_in|0.1;radio.level_out|resonator.shape_cv_in|0.2;radio.level_out|resonator.damp_cv_in|0.3;radio.level_out|resonator.excite_cv_in|0.4;radio.level_out|resonator.drift_cv_in|0.5;radio.level_out|resonator.feedback_cv_in|0.6;radio.audio_out|resonator.audio_in;local.audio_out|resonator.audio_in" };
+    for (const char* text : bad)
+    {
+        const Graph g2 = loadPatch (text);
+        CHECK (g2.size() <= kNumInputs);
+        for (int i = 0; i < g2.size(); ++i)
+        {
+            CHECK (Graph().check (g2[i].from, g2[i].to) == ConnectError::None);                     // each cable is one connect() would accept
+            CHECK (std::isfinite (g2[i].depth) && g2[i].depth >= -1.0f && g2[i].depth <= 1.0f);
+            if (ports[g2[i].to].type == PortType::Audio) CHECK (g2[i].depth == 1.0f);
+            for (int j = 0; j < i; ++j) CHECK (g2[j].to != g2[i].to);                               // one cable per input
+        }
+    }
+    CHECK (loadPatch ("radio.level_out|resonator.damp_cv_in|nan").depthInto (kResDampIn) == 1.0f);
+    CHECK (loadPatch ("radio.level_out|resonator.damp_cv_in|1e30").depthInto (kResDampIn) == 1.0f);
+    CHECK (loadPatch ("radio.level_out|resonator.damp_cv_in|-7").depthInto (kResDampIn) == -1.0f);
+    CHECK (loadPatch ("radio.level_out|resonator.damp_cv_in|0.3;room.level_out|resonator.damp_cv_in|0.9").depthInto (kResDampIn) == 0.3f);
+}
+
+void graphRules()   // AT-13
+{
+    currentTest = "AT-13 graph rules";
+    Graph g;
+    CHECK (g.connect (kRadioAudioOut, kResAudioIn, -0.5f) == ConnectError::None && g.depthInto (kResAudioIn) == 1.0f);   // audio: always +1
+    CHECK (g.connect (kRoomLevelOut, kResFeedbackIn) == ConnectError::None && g.depthInto (kResFeedbackIn) == 1.0f);     // default +1
+    CHECK (g.connect (kRoomLevelOut, kResDampIn, -3.0f) == ConnectError::None && g.depthInto (kResDampIn) == -1.0f);     // clamped
+    CHECK (g.setDepth (kRoomLevelOut, kResFeedbackIn, 0.4f) == ConnectError::None && g.depthInto (kResFeedbackIn) == 0.4f);
+    CHECK (g.depthInto (kResDampIn) == -1.0f);                                                                           // fan-out: the other cable is untouched
+    CHECK (g.setDepth (kRoomLevelOut, kResFeedbackIn, 9.0f) == ConnectError::None && g.depthInto (kResFeedbackIn) == 1.0f);
+    CHECK (g.setDepth (kRoomLevelOut, kResFeedbackIn, std::numeric_limits<float>::quiet_NaN()) == ConnectError::NoDepth && g.depthInto (kResFeedbackIn) == 1.0f);
+    CHECK (g.setDepth (kRadioAudioOut, kResAudioIn, 0.5f) == ConnectError::NoDepth && g.depthInto (kResAudioIn) == 1.0f);
+    CHECK (g.setDepth (kRoomLevelOut, kResPitchIn, 0.5f) == ConnectError::NotConnected);
+    CHECK (g.depthInto (kResPitchIn) == 1.0f);                                                                           // no cable: +1 by convention
+    CHECK (g.connect (kRadioLevelOut, kResDampIn) == ConnectError::FanIn);                                               // existing rules unchanged
+    const auto p = RoutingPlan::fromGraph (g);
+    CHECK (p.sourceOf (kResDampIn) == kRoomLevelOut && p.depthOf (kResDampIn) == -1.0f && p.depthOf (kResAudioIn) == 1.0f && p.sourceOf (kResPitchIn) == -1);
+}
+
+void zeroCoupleAndAbsentSources()   // AT-03, AT-06, AT-07
+{
+    const Graph audio = wire<Graph> (kAudio);
+    const auto none = render (plan (audio), loud()).out;
+    currentTest = "AT-03 zero is neutral";
+    for (int in = kResPitchIn; in < kNumPorts; ++in)
+        for (int from : { kRoomLevelOut, kRoomActivityOut, kRadioLevelOut })
+            CHECK (same (none, render (plan (with (audio, from, in, 0.0f)), loud()).out));
+
+    currentTest = "AT-06 COUPLE is the master";
+    auto off = loud();
+    off.p[kCouple] = 0.0f;
+    Graph busy = Graph::defaultPatch();
+    const float d[] = { -1.0f, 0.5f, -0.3f, 1.0f, -0.8f, 0.2f };
+    for (int in = kResPitchIn; in < kNumPorts; ++in) busy.setDepth (busy.cableInto (in), in, d[in - kResPitchIn]);
+    CHECK (same (render (plan (audio), off).out, render (plan (busy), off).out));
+
+    currentTest = "AT-07 unavailable source stays neutral";
+    auto silentRoom = loud();
+    silentRoom.room = {};                                                           // ROOM off, denied or stale reads as zero
+    const auto quiet = render (plan (audio), silentRoom).out;
+    for (float depthValue : { -1.0f, -0.4f, 0.0f, 0.4f, 1.0f })
+    {
+        Graph g = audio;
+        g.connect (kRoomLevelOut, kResFeedbackIn, depthValue); g.connect (kRoomLevelOut, kResDampIn, depthValue);
+        g.connect (kRoomActivityOut, kResPitchIn, depthValue); g.connect (kRoomBrightnessOut, kResShapeIn, depthValue); g.connect (kRoomLevelOut, kResDriftIn, depthValue);
+        CHECK (same (quiet, render (plan (g), silentRoom).out));                    // five destinations: neutral at every depth
+        // STRIKE: neutral at zero and negative depth...
+        if (depthValue <= 0.0f) CHECK (same (quiet, render (plan (with (audio, kRoomActivityOut, kResExciteIn, depthValue)), silentRoom).out));
+    }
+    // ...but NOT at positive depth. KNOWN DEVIATION from the contract, kept on purpose: in the auditioned build a cable
+    // in STRIKE makes the steady excitation back off even while its source is silent, and "+100 % reproduces the
+    // original" wins until the owner decides otherwise (docs/p0/ATTENUVERTER-ACCEPTANCE.md, "Open conflict").
+    {
+        const auto struck = render (plan (with (audio, kRoomActivityOut, kResExciteIn, 1.0f)), silentRoom).out;
+        CHECK (! same (quiet, struck));
+        CHECK (rms (struck) < rms (quiet));                                         // quieter, as in the auditioned build
+    }
+}
+
+void signAndDirection()   // AT-04
+{
+    currentTest = "AT-04 sign and direction";
+    const Graph audio = wire<Graph> (kAudio);
+    auto three = [&] (int from, int to, Controls c, double seconds = 2.0, double inputSeconds = 1.0e9)
+    { return std::array<Run, 3> { render (plan (with (audio, from, to, -1.0f)), c, 48000.0, seconds, inputSeconds), render (plan (with (audio, from, to, 0.0f)), c, 48000.0, seconds, inputSeconds),
+                                  render (plan (with (audio, from, to, 1.0f)), c, 48000.0, seconds, inputSeconds) }; };
+    auto ordered = [] (float minus, float zero, float plus) { CHECK (minus < zero); CHECK (zero < plus); };
+    auto distinct = [] (const std::array<Run, 3>& r) { CHECK (! same (r[0].out, r[1].out)); CHECK (! same (r[2].out, r[1].out)); CHECK (! same (r[0].out, r[2].out)); };
+    auto hf = [] (const Buf& y) { double s = 0; for (size_t i = 4; i < y.size(); i += 2) s += (double) (y[i] - y[i - 2]) * (y[i] - y[i - 2]); return (float) std::sqrt (s / (double) y.size()); };
+    auto travel = [] (const std::vector<float>& f) { double s = 0; for (size_t i = 1; i < f.size(); ++i) s += std::abs (f[i] - f[i - 1]); return (float) s; };
+
+    {   // PITCH: the resonator frequency ends above / below neutral by about a semitone
+        const auto r = three (kRoomLevelOut, kResPitchIn, loud());
+        distinct (r);
+        ordered (r[0].f0.back(), r[1].f0.back(), r[2].f0.back());
+        CHECK (std::abs (1200.0f * std::log2 (r[2].f0.back() / r[1].f0.back()) - 100.0f) < 2.0f);
+        CHECK (std::abs (1200.0f * std::log2 (r[0].f0.back() / r[1].f0.back()) + 100.0f) < 2.0f);
+    }
+    {   // SHAPE: the second resonator's ratio moves up / down
+        auto c = loud();
+        c.p[kShape] = 0.5f;
+        const auto r = three (kRoomBrightnessOut, kResShapeIn, c);
+        distinct (r);
+        ordered (r[0].f1.back(), r[1].f1.back(), r[2].f1.back());
+    }
+    {   // TONE: brighter / darker ringing
+        auto c = loud();
+        c.p[kTone] = 0.5f; c.p[kMix] = 1.0f;
+        const auto r = three (kRoomLevelOut, kResDampIn, c);
+        distinct (r);
+        ordered (hf (r[0].out), hf (r[1].out), hf (r[2].out));
+    }
+    {   // STRIKE: a constant "hit" signal drives the excitation up (+) or ducks it to nothing (-)
+        auto c = loud();
+        c.p[kMix] = 1.0f; c.p[kFeedback] = 0.3f;
+        const auto r = three (kRoomActivityOut, kResExciteIn, c);
+        distinct (r);
+        ordered (rms (r[0].out, r[0].out.size() / 2), rms (r[1].out, r[1].out.size() / 2), rms (r[2].out, r[2].out.size() / 2));
+        CHECK (rms (r[0].out, r[0].out.size() / 2) < 0.05f * rms (r[1].out, r[1].out.size() / 2));   // ducked almost to silence, never inverted
+    }
+    {   // DRIFT: the pitch wanders further per second (+) or less (-)
+        auto c = loud();
+        c.p[kDrift] = 0.5f;
+        const auto r = three (kRoomLevelOut, kResDriftIn, c, 6.0);
+        distinct (r);
+        ordered (travel (r[0].f0), travel (r[1].f0), travel (r[2].f0));
+    }
+    {   // FEEDBACK: the tail after the input stops is longer (+) or shorter (-)
+        auto c = loud();
+        c.p[kFeedback] = 0.6f; c.p[kMix] = 1.0f;
+        const auto r = three (kRoomLevelOut, kResFeedbackIn, c, 3.0, 1.0);
+        distinct (r);
+        const size_t from = (size_t) (48000 * 2 * 2);                                 // the last second
+        ordered (rms (r[0].out, from), rms (r[1].out, from), rms (r[2].out, from));
+    }
+}
+
+void fanOut()   // AT-05
+{
+    currentTest = "AT-05 independent fan-out";
+    const Graph audio = wire<Graph> (kAudio);
+    const auto one = render (plan (with (audio, kRoomLevelOut, kResFeedbackIn, 0.6f)), loud());
+    CHECK (same (one.out, render (plan (with (with (audio, kRoomLevelOut, kResFeedbackIn, 0.6f), kRoomLevelOut, kResDampIn, 0.0f)), loud()).out));
+    // same source into PITCH (fixed depth) and TONE (varied): the pitch does not care what the TONE cable's depth is
+    const auto a = render (plan (with (with (audio, kRoomLevelOut, kResPitchIn, 0.7f), kRoomLevelOut, kResDampIn, 1.0f)), loud());
+    const auto b = render (plan (with (with (audio, kRoomLevelOut, kResPitchIn, 0.7f), kRoomLevelOut, kResDampIn, -1.0f)), loud());
+    CHECK (a.f0 == b.f0);
+    CHECK (! same (a.out, b.out));
+    const auto c = render (plan (with (with (audio, kRoomLevelOut, kResPitchIn, -0.7f), kRoomLevelOut, kResDampIn, 1.0f)), loud());
+    CHECK (a.f0 != c.f0);
+}
+
+void clickFree()   // AT-09
+{
+    currentTest = "AT-09 click-free depth changes";
+    Engine e;
+    e.prepare (48000.0);
+    auto c = loud();
+    c.p[kTone] = 0.2f; c.p[kPitch] = 0.1f; c.p[kCouple] = 0.8f; c.room = { 0.9f, 0.0f, 0.5f };
+    Buf tone (48000 * 2);
+    for (size_t i = 0; i < tone.size(); ++i) tone[i] = 0.3f * std::sin (2.0f * kPi * 100.0f * (float) i / 48000.0f);
+    Buf y;
+    for (int seg = 0; seg < 80; ++seg)
+    {
+        Graph g = Graph::defaultPatch();
+        for (int in = kResPitchIn; in < kNumPorts; ++in) g.setDepth (g.cableInto (in), in, (seg + in) % 2 ? 1.0f : -1.0f);   // every depth flips end to end
+        c.plan = RoutingPlan::fromGraph (g);
+        Buf l (1200), r (1200);
+        e.process (tone.data() + seg * 1200, tone.data() + seg * 1200, tone.data() + seg * 1200, l.data(), r.data(), 1200, c);
+        y.insert (y.end(), l.begin(), l.end());
+    }
+    float step = 0;
+    for (size_t i = 1; i < y.size(); ++i) step = std::max (step, std::abs (y[i] - y[i - 1]));
+    CHECK (step < 0.03f);
+    CHECK (rms (y) > 1.0e-3f);
+}
+
+void coherentHandOff()   // AT-11
+{
+    currentTest = "AT-11 coherent hand-off";
+    PlanMailbox mail;
+    auto make = [] (int k) { RoutingPlan p; for (int i = 0; i < kNumInputs; ++i) { p.source[i] = (int8_t) (k % 100); p.depth[i] = (float) (k % 2001 - 1000) / 1000.0f; } return p; };
+    const int total = 400000;
+    std::atomic<bool> done { false };
+    std::atomic<int> torn { 0 }, backwards { 0 };
+    std::atomic<long long> reads { 0 };
+    mail.publish (make (0));
+    std::thread reader ([&]
+    {
+        int lastDepthStep = -1;
+        (void) lastDepthStep;
+        while (! done.load())
+        {
+            const RoutingPlan p = mail.read();
+            for (int i = 1; i < kNumInputs; ++i) if (p.source[i] != p.source[0] || p.depth[i] != p.depth[0]) torn.fetch_add (1);   // a mixture of two plans
+            reads.fetch_add (1);
+        }
+    });
+    for (int k = 1; k <= total; ++k) mail.publish (make (k));
+    done = true;
+    reader.join();
+    CHECK (torn.load() == 0);
+    CHECK (backwards.load() == 0);
+    CHECK (reads.load() > 1000);
+    const RoutingPlan last = mail.read(), want = make (total);                       // the reader always ends on the newest plan
+    CHECK (last.source[0] == want.source[0] && last.depth[0] == want.depth[0]);
+}
+
+void panic()   // AT-15
+{
+    currentTest = "AT-15 PANIC";
+    auto c = loud();
+    for (auto& p : c.p) p = 1.0f;
+    Graph g = Graph::defaultPatch();
+    for (int in = kResPitchIn; in < kNumPorts; ++in) g.setDepth (g.cableInto (in), in, -1.0f);
+    c.plan = RoutingPlan::fromGraph (g);
+    Engine e;
+    e.prepare (48000.0);
+    const auto loudIn = noise (48000, 1.0f);
+    Buf l (48000), r (48000);
+    e.process (loudIn.data(), loudIn.data(), loudIn.data(), l.data(), r.data(), 48000, c);
+    CHECK (peak (l) > 0.0f && peak (l) <= Engine::kCeiling);
+    e.reset();
+    const Buf silence (48000, 0.0f);
+    e.process (silence.data(), silence.data(), silence.data(), l.data(), r.data(), 48000, c);
+    CHECK (peak (l) == 0.0f && peak (r) == 0.0f);
+}
+
+void all()
+{
+    legacyParity();
+    persistence();
+    graphRules();
+    zeroCoupleAndAbsentSources();
+    signAndDirection();
+    fanOut();
+    clickFree();
+    coherentHandOff();
+    panic();
+}
+} // namespace depth
 
 // ---- informational: what the control states do to level and brightness. Proxies only; nobody has listened to these.
 void metrics()
@@ -474,6 +860,7 @@ int main (int argc, char** argv)
     testGraph();
     testPatching();
     testNoAllocation();
+    depth::all();
     if (argc > 1 && std::strcmp (argv[1], "--metrics") == 0) metrics();
     std::printf ("%d checks, %d failed\n", checks, failures);
     return failures;

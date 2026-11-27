@@ -68,3 +68,72 @@ None of the automated tests is evidence of sound quality.
 Mixing several sources into one input; trigger/gate port types; source offset or re-biasing; MIDI control of a
 cable's depth (the selection-follows-MIDI semantics need to be designed first, so a controller can never retarget
 by accident); undo.
+
+---
+
+## Results (added after implementation, 2026-11-27)
+
+Build: branch `p0/attenuverter`. `ctest --test-dir build`: `wildband_tests` **659 checks, 0 failed** (the 442
+baseline checks plus these), also with `-O3 -ffp-contract=off`; `wildband_talora_parity` 120 000 edits, 0
+disagreements.
+
+| ID | Result | Notes |
+|---|---|---|
+| AT-01 | **Pass** | 36 runs (3 rates × 3 patches × 4 control states), sample-identical to the frozen engine |
+| AT-02 | **Pass** | Also seen for real: the owner's saved P0 patch (no depths) loaded on this build with every cable at +100 % |
+| AT-03 | **Pass** | 18 cable/source combinations |
+| AT-04 | **Pass** | PITCH lands within 2 cents of ±100 cents; the other five are ordered −1 < 0 < +1 on their observable |
+| AT-05 | **Pass** | |
+| AT-06 | **Pass** | |
+| AT-07 | **Pass for five destinations; STRIKE deviates at positive depth** | See "Open conflict" |
+| AT-08 | **Pass** | Garbage plans (NaN, ±infinity, ±1e30, random sources) in the hostile-input runs; mixed signed depths in the block-size test |
+| AT-09 | **Pass** | Every depth flipped −1 ↔ +1 every 25 ms for 2 s: largest step below 0.03 |
+| AT-10 | **Pass** | 0 allocations with plans published and read in the loop |
+| AT-11 | **Pass** | 400 000 plans published against a concurrent reader: 0 torn plans; the reader ends on the last plan |
+| AT-12 | **Pass** | 22 malformed strings |
+| AT-13 | **Pass** | |
+| AT-14 | **Pass** | |
+| AT-15 | **Pass** | |
+
+Synthetic cost of `Engine::process` (48 kHz, noise, same machine): 74 ns per sample before, 77 ns after.
+CoreAudio sweep on this build: [`evidence/coreaudio-minifuse-depth-branch.md`](evidence/coreaudio-minifuse-depth-branch.md).
+
+### Open conflict: STRIKE at positive depth with a silent source (owner decision)
+
+Two clauses of the contract disagree for one destination:
+
+- "+100 % reproduces the original cable behaviour", and
+- "a zero / stale / denied source stays neutral at every depth".
+
+In the auditioned build, *plugging a cable into STRIKE* makes the steady excitation back off by up to 70 % (so that
+the control signal's hits stand out), **whether or not the source is producing anything**. A ROOM → STRIKE cable with
+ROOM switched off therefore makes the instrument quieter. That is the original behaviour, so at +100 % it is kept
+exactly (AT-01 requires it), and AT-07 records the deviation with an explicit check rather than hiding it. The
+back-off now scales with positive depth: none at 0 % or below, full at +100 %.
+
+Options for the owner:
+
+1. **Keep it** (current): the default patch sounds exactly as auditioned; a dead source in STRIKE dims the sound.
+2. **Make the back-off follow the source's recent activity** instead of the cable's presence: a silent source then
+   changes nothing, satisfying both clauses for live sources — but the default patch (RADIO HITS → STRIKE) will feel
+   slightly different between hits, so it needs a fresh audition and AT-01 would be re-baselined for that cable.
+
+### Design choices that need ears, not tests
+
+- STRIKE at negative depth **ducks** the excitation (hits make gaps). The alternative would be phase inversion,
+  which is inaudible on its own.
+- DRIFT at negative depth **slows** the wander (down to a quarter speed) rather than reversing it.
+- TONE at negative depth can close the filter to 60 Hz, which is nearly silence with MIX fully right.
+- The DEPTH strip appears in the hint line when a cable is selected; messages that would appear there are hidden
+  while it is showing.
+
+### Interface, as built
+
+Click a control cable or its input socket: the cable is outlined, and a DEPTH strip appears beside MIDI LEARN with
+the route ("ROOM HITS > FEEDBACK"), a centre-zero slider (−100 … +100 %) and the signed value. Double-click the
+slider for 0. Any cable not at +100 % carries a small signed badge; inverted cables are dashed. Dragging a cable to
+another input keeps its depth; a newly made cable is selected at +100 %. Audio cables can be selected but have no
+depth. Checked from a rendered snapshot ([`evidence/ui-depth-selected.png`](evidence/ui-depth-selected.png)) and
+through the `Graph` tests; **no one has operated it by hand yet.**
+
+Not done: MIDI control of depth; keyboard access; undo.
