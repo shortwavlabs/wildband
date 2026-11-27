@@ -46,12 +46,14 @@ and macOS may ask about WILDBAND Room again the first time ROOM is used in each.
 
 | Build | Branch | Path |
 |---|---|---|
-| Baseline (what you auditioned) | `p0/prototype` | `wildband/build/WILDBAND_artefacts/Release/WILDBAND.app` |
-| + per-cable DEPTH | `p0/attenuverter` | `wildband-depth/build/WILDBAND_artefacts/Release/WILDBAND.app` |
-| + DEPTH + STRIKE correction | `p0/strike-neutral` | `wildband-strike/build/WILDBAND_artefacts/Release/WILDBAND.app` |
-| + DEPTH + tuner (static, NEXT/PREVIOUS) | `p0/tuner` | `wildband-tuner/build/WILDBAND_artefacts/Release/WILDBAND.app` |
+| Baseline (what you auditioned) | `p0/prototype` | [`auditions/p0-baseline/WILDBAND.app`](../../auditions/p0-baseline/) |
+| + per-cable DEPTH | `p0/attenuverter` | [`auditions/p0-depth/WILDBAND.app`](../../auditions/p0-depth/) |
+| + DEPTH + STRIKE correction | `p0/strike-neutral` | [`auditions/p0-strike-neutral/WILDBAND.app`](../../auditions/p0-strike-neutral/) |
+| + DEPTH + tuner (static, NEXT/PREVIOUS) | `p0/tuner` | [`auditions/p0-tuner/WILDBAND.app`](../../auditions/p0-tuner/) |
 
-(all under `/Users/shortwavlabs/Workspace/shortwavlabs/`). The tuner build does not include the STRIKE correction.
+Paths are relative to the repository root. `auditions/` is a local folder kept out of git (excluded in
+`.git/info/exclude`); each build sits beside its own `WILDBAND Room.app`, and `auditions/README.txt` records the
+branch and commit each was built from. The tuner build does not include the STRIKE correction.
 
 ## C. Attenuverter audition (build from branch `p0/attenuverter`)
 
