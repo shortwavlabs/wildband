@@ -33,3 +33,26 @@ if it were a retune. Changing an audio setting is housekeeping, not a musical ge
 | TR-04 | In the app, on real CoreAudio | Switching the output device and back while a station plays: gap 0 and static 0 in every log line |
 
 Not automatable (owner): the listening comparisons in `OWNER-AUDITION.md`.
+
+---
+
+## Results (added after implementation, 2026-11-27)
+
+**Technical evidence only; all runs muted.**
+
+The receiver now keeps a separate count of station requests and a "station wanted" flag that only `tune` sets and
+that clears once the station has played. The tune gap (and so the static) opens only while that flag is set.
+
+| ID | Result | Measured |
+|---|---|---|
+| TR-01 | **Pass** | Rate 48 → 44.1 → 48 kHz while playing: the stream restarted each time and was LIVE again within about 0.3 s (local server); gap stayed 0, no static, request number unchanged |
+| TR-02 | **Pass** | A rate change one second into a 3 s station change: static for the whole 4.0 s until LIVE, none after |
+| TR-03 | **Pass** | `wildband_tuner_check`: **27 checks, 0 failed** ([`evidence/tuner-restarts-check.txt`](evidence/tuner-restarts-check.txt)); `wildband_tests`: 788 checks, 0 failed |
+| TR-04 | **Pass, but weaker than it looks** | In the app, MiniFuse → built-in speakers → MiniFuse while playing: gap 0 and static 0 throughout ([`evidence/tuner-restarts-device-switch.txt`](evidence/tuner-restarts-device-switch.txt)). Both devices were at 48 kHz, so the stream was **not** restarted in this run (connection count stayed at 1). The restart path itself is exercised by TR-01, not here |
+
+My first version of TR-01 failed for a reason in the test, not the receiver: it looked at the state 0.3 s after the
+rate change, by which time the local server had already brought the stream back.
+
+Still true, by design: launching the app is a station request, so the first connection has static.
+
+Not done: a device switch that really changes the sample rate, in the app, by hand; sleep/wake.

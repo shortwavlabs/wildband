@@ -213,6 +213,37 @@ int main (int argc, char** argv)
                "static rings the engine (peak %.2f), PANIC gives exact silence until the station arrives %.2f s later, then it plays", (double) beforePanic, liveAt - panicAt);
     }
 
+    std::printf ("TR-01 / TR-02 audio-configuration restarts are not retunes\n");
+    {
+        Rig rig;
+        rig.radio.tune (base + "/a");
+        rig.untilLive (10.0);
+        rig.run (1.0);
+        const int request = rig.radio.request();
+        for (double rate : { 44100.0, 48000.0 })                       // what a device or sample-rate change does to the receiver
+        {
+            const double from = rig.now();
+            rig.radio.setOutputRate (rate);
+            rig.run (0.3);
+            const double live = rig.untilLive (10.0);
+            rig.run (0.5);
+            bool wentAway = false;                                       // the stream really was restarted
+            for (auto& f : rig.log) if (f.t >= from && f.state != Radio::State::Playing) wentAway = true;
+            CHECK (wentAway && live > 0 && rig.maxGap (from, rig.now()) == 0.0f && rig.maxStatic (from, rig.now()) < 0.001f && rig.radio.request() == request,
+                   "rate -> %.0f while playing: stream restarted and LIVE again after %.2f s; gap stayed 0, no static, same request", rate, live + 0.3);
+        }
+        const double start = rig.now();                                // ...but a rate change in the middle of a station change keeps its static
+        rig.radio.tune (base + "/wait/3.0");
+        rig.run (1.0);
+        rig.radio.setOutputRate (44100.0);
+        const double live = rig.untilLive (12.0);
+        rig.run (0.5);
+        const double liveAt = start + 1.0 + live;
+        CHECK (live > 0 && rig.radio.request() == request + 1 && rig.staticSeconds (start, liveAt) > 0.8 * (liveAt - start) && rig.maxStatic (liveAt + 0.3, rig.now()) < 0.01f,
+               "rate change 1 s into a station change: static for %.2f of the %.2f s until LIVE, none after", rig.staticSeconds (start, liveAt), liveAt - start);
+        rig.radio.setOutputRate (48000.0);
+    }
+
     std::printf ("CT-15 spontaneous dropout\n");
     {
         Rig rig;

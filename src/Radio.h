@@ -34,8 +34,9 @@ public:
         spontaneous dropout of a station that was playing, and when idle or failed. The tuner static follows this,
         so it lasts exactly as long as the real wait. Written by read(). */
     std::atomic<float> tuneGap { 0.0f };
-    /** Changes with every request (tune or sample-rate change). The engine restarts the static's time limit on it. */
-    int request() const noexcept { return gen.load (std::memory_order_relaxed); }
+    /** Changes with every STATION request (tune), and only then: a restart caused by a sample-rate or device change
+        is not a request. The engine restarts the static's time limit on it. */
+    int request() const noexcept { return tuneCount.load (std::memory_order_relaxed); }
 
     static const char* name (State) noexcept;
 
@@ -67,6 +68,8 @@ private:
 
     static constexpr int kSettleMs = 150;            // requests closer together than this are coalesced into the last one
     std::atomic<bool> burst { false };
+    std::atomic<int> tuneCount { 0 };
+    std::atomic<bool> stationWanted { false };       // a station the player asked for has not played yet (set by tune, cleared once it plays)
     std::atomic<juce::uint32> lastTuneMs { 0 };
 
     // audio thread state

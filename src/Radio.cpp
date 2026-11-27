@@ -140,6 +140,8 @@ void Radio::tune (const juce::String& newUrl)
         const auto now = juce::Time::getMillisecondCounter();
         if (now - lastTuneMs.load() < (juce::uint32) kSettleMs) burst = true;   // a quick succession of requests: only the last one connects
         lastTuneMs = now;
+        tuneCount.fetch_add (1);
+        stationWanted = true;                                // only this, never setOutputRate, makes a restart a "retune"
         ++gen;
         phase = url.isEmpty() ? Phase::Idle : Phase::Connecting;
         if (activeStream != nullptr) activeStream->cancel();
@@ -225,9 +227,11 @@ void Radio::read (float* left, float* right, int n) noexcept
     }
     readerPlaying = playing;
 
-    if (playing && gain >= 1.0f) playedThisGen = true;
+    if (playing && gain >= 1.0f) { playedThisGen = true; if (readerGen == g) stationWanted.store (false, std::memory_order_relaxed); }
     const auto ph = phase.load (std::memory_order_relaxed);
-    const bool fetching = ph != Phase::Idle && ph != Phase::Failed && (readerGen != g || ! playedThisGen);
+    // The gap opens only for a station the player asked for. A restart for a new sample rate or device, like a
+    // spontaneous dropout, fades and re-buffers in silence - unless it interrupts a station change still in progress.
+    const bool fetching = ph != Phase::Idle && ph != Phase::Failed && stationWanted.load (std::memory_order_relaxed) && (readerGen != g || ! playedThisGen);
     tuneGap.store (fetching ? 1.0f - gain : 0.0f, std::memory_order_relaxed);
 }
 
