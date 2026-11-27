@@ -83,6 +83,46 @@ add_custom_command(TARGET WILDBAND POST_BUILD VERBATIM
     COMMAND codesign --force --sign - "$<TARGET_BUNDLE_DIR:WILDBAND>/../WILDBAND Room.app"
     COMMAND codesign --force --sign - "$<TARGET_BUNDLE_DIR:WILDBAND>")
 
+# ---- the plugin (AU, VST3): first proof of the shared architecture, docs/p1/PLUGIN-ARCHITECTURE.md.
+# An instrument (no audio input). It declares no microphone use. Not signed for distribution, not installed by the build.
+option(WILDBAND_PLUGIN "Build the AU and VST3 plugin proof" ON)
+if(WILDBAND_PLUGIN)
+    juce_add_plugin(WILDBAND_Plugin
+        PRODUCT_NAME "WILDBAND"
+        COMPANY_NAME "Shortwav Labs"
+        BUNDLE_ID com.shortwavlabs.wildband.plugin
+        PLUGIN_MANUFACTURER_CODE SwLb
+        PLUGIN_CODE Wldb
+        FORMATS AU VST3
+        IS_SYNTH TRUE
+        NEEDS_MIDI_INPUT TRUE
+        NEEDS_MIDI_OUTPUT FALSE
+        AU_MAIN_TYPE kAudioUnitType_MusicDevice
+        VST3_CATEGORIES Instrument
+        COPY_PLUGIN_AFTER_BUILD FALSE)
+    target_sources(WILDBAND_Plugin PRIVATE src/Plugin.cpp src/Radio.cpp)
+    target_compile_definitions(WILDBAND_Plugin PUBLIC ${WILDBAND_DEFS} JUCE_VST3_CAN_REPLACE_VST2=0)
+    target_link_libraries(WILDBAND_Plugin PRIVATE juce::juce_audio_utils "-framework AudioToolbox"
+        juce::juce_recommended_config_flags juce::juce_recommended_lto_flags juce::juce_recommended_warning_flags)
+    if(TARGET wildband_rings)
+        target_link_libraries(WILDBAND_Plugin PRIVATE wildband_rings)
+    endif()
+    foreach(format AU VST3)
+        add_custom_command(TARGET WILDBAND_Plugin_${format} POST_BUILD VERBATIM
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_DIR:WILDBAND_Plugin_${format}>/Contents/Resources"
+            COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" "${CMAKE_CURRENT_SOURCE_DIR}/THIRD-PARTY-NOTICES.md" "$<TARGET_BUNDLE_DIR:WILDBAND_Plugin_${format}>/Contents/Resources/"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/licenses" "$<TARGET_BUNDLE_DIR:WILDBAND_Plugin_${format}>/Contents/Resources/licenses"
+            COMMAND codesign --force --deep --sign - "$<TARGET_BUNDLE_DIR:WILDBAND_Plugin_${format}>")
+    endforeach()
+
+    # headless check of the built bundles (loads them through JUCE's hosting code; not a DAW)
+    juce_add_console_app(wildband_plugin_check PRODUCT_NAME wildband_plugin_check)
+    target_sources(wildband_plugin_check PRIVATE tools/PluginCheck.cpp)
+    target_compile_definitions(wildband_plugin_check PRIVATE JUCE_PLUGINHOST_AU=1 JUCE_PLUGINHOST_VST3=1 JUCE_MODAL_LOOPS_PERMITTED=1 JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0
+        JUCE_USE_FLAC=0 JUCE_USE_OGGVORBIS=0 JUCE_USE_OPUS=0 JUCE_USE_MP3AUDIOFORMAT=0 JUCE_USE_WEBP=0)
+    target_link_libraries(wildband_plugin_check PRIVATE juce::juce_audio_utils juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+endif()
+
 # ---- G1 evidence tool: the real receiver, no audio device
 juce_add_console_app(wildband_radio_probe PRODUCT_NAME wildband_radio_probe)
 target_sources(wildband_radio_probe PRIVATE tools/RadioProbe.cpp src/Radio.cpp)

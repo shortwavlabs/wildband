@@ -74,7 +74,9 @@ transients and static; whether it should replace or complement it; which control
 
 **Technical evidence only; every run was muted. Nobody has listened to Rings in WILDBAND.**
 
-`wildband_tests`: **884 checks, 0 failed** with Rings configured (831 without, unchanged).
+`wildband_tests`: **926 checks, 0 failed** with Rings configured (831 without, unchanged). Also built from a clean
+clone with `-DWILDBAND_FETCH_RINGS=ON`: CMake fetched `pichenettes/eurorack` at exactly `f4cfa76` with `stmlib` at
+`e3bd7c9`, and the same 926 checks pass.
 
 | ID | Result | Notes |
 |---|---|---|
@@ -85,6 +87,7 @@ transients and static; whether it should replace or complement it; which control
 | RG-05 | **Pass** | Identical output for block sizes 1, 64 and 1000; an impulse first appears 24–26 samples later |
 | RG-06 | **Pass** | STRUCTURE, BRIGHTNESS, DAMPING and POSITION each change the output in every model; a ROOM LEVEL → TONE cable changes it with COUPLE up and not at all with COUPLE at 0 |
 | RG-07 | **Pass** | Switching among the resonator, Dissolve and the three Rings models every 50 ms: no step |
+| RG-07b (added after review) | **Pass** | Knob jumps (PITCH, SHAPE, TONE, FEEDBACK, DRIFT, MIX, LEVEL) with each Rings model selected: no step. Rings was first given the knob targets instead of the smoothed values, contrary to the audit table above; fixed |
 | RG-08 | **Pass** | `git status` clean in the upstream checkout and in its `stmlib` submodule: compiled unmodified |
 
 The adapter (`src/RingsVoice.h`, 110 lines, WILDBAND's own) worked against upstream's public interface at the first

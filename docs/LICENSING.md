@@ -96,7 +96,7 @@ code and third-party material. **As of this commit:**
 | LOOP, from Tapestry | `shortwavlabs/vcv-tapestry` (same author) | GPL-3.0-or-later | Combined with AGPL-3.0 code under GPLv3 §13; the Tapestry-derived files keep a GPL-3.0-or-later header and notice. No Rack SDK types; no file import/export |
 | Korupt | `vcv-tapestry` | GPL-3.0-or-later | As above, and the Rack SDK types are replaced, not copied |
 | Wyrd, Drift | `vcv-tapestry`, generated from the owner's Vult sources (reproduced byte for byte with `vultc` 0.4.15) | GPL-3.0-or-later; Vult runtime MIT | Keep the Vult runtime's MIT notice; keep the `.vult` sources and the exact generator command with the generated files |
-| AU / VST3 wrappers | JUCE; VST3 SDK (MIT); AudioUnit SDK (Apache-2.0) | as stated | Regenerate the notices when the plugin targets exist |
+| AU / VST3 wrappers | JUCE; VST3 SDK 3.8.0 (MIT); AudioUnitSDK 1.1.0 (Apache-2.0) | as stated | **Present** on the plugin-proof branch; texts in `licenses/`, rows in the notices |
 
 ## Combining GPL-3.0 and AGPL-3.0 code
 

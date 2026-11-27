@@ -33,6 +33,16 @@ JUCE modules linked by the app: `juce_audio_utils`, `juce_audio_processors`, `ju
 
 "This software is based in part on the work of the Independent JPEG Group."
 
+### Additionally compiled into the AU and VST3 plugin bundles
+
+| Component | Version | Licence | Vendored at (in JUCE `modules/`) | Licence text |
+|---|---|---|---|---|
+| VST3 SDK (Steinberg) | 3.8.0 | MIT | `juce_audio_processors_headless/format_types/VST3_SDK` | [`licenses/VST3-SDK-MIT.txt`](licenses/VST3-SDK-MIT.txt) |
+| AudioUnitSDK (Apple) | 1.1.0 | Apache-2.0 | `juce_audio_plugin_client/AU/AudioUnitSDK` | [`licenses/AudioUnitSDK-Apache-2.0.txt`](licenses/AudioUnitSDK-Apache-2.0.txt) |
+
+VST is a trademark of Steinberg Media Technologies GmbH. Audio Unit is a trademark of Apple Inc.
+The plugin bundles carry `LICENSE`, this file and `licenses/` in `Contents/Resources`, as the app does.
+
 ### Only in builds configured with the Rings experiment (`-DEURORACK_DIR` or `-DWILDBAND_FETCH_RINGS=ON`)
 
 | Component | Version | Licence | Source | Licence text |
@@ -60,8 +70,7 @@ app bundle (`WILDBAND.app/Contents/Resources/licenses/`) by the build.
 | ASIO SDK | Steinberg ASIO OR GPL-3.0-only | Windows only; `JUCE_ASIO` off |
 | `@juce-framework/webview` | AGPL-3.0-only OR JUCE commercial | `JUCE_WEB_BROWSER=0` |
 
-**This table will change when the AU/VST3 plugin targets are added** (the VST3 SDK and AudioUnit SDK then become
-compiled-in components, as in AFTERIMAGE). The list must be regenerated at that point.
+The VST3 SDK row applies to the standalone app only; the plugin bundles do compile it (see above).
 
 ## System components (not distributed)
 
