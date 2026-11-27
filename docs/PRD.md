@@ -23,6 +23,8 @@ Open the standalone app; hear a safe default. Tune a live Icecast/Shoutcast-comp
 
 **P1 options, only after P0:** second independent stream with cross-modulation, weather data as optional slow control signal, Bluetooth RSSI experiment, Wi-Fi API feasibility, deeper modulation patching, native AU/VST3.
 
+**Field Kit-inspired follow-ups (proposed, not added to P0):** prioritize (1) auxiliary mixer and bounded feedback routing and (2) adjustable envelope follower + gate as first musical experiments after owner P0 audition. Evaluate (3) sensor/CV calibration and (4) a minimal LFO later; optional electromagnetic/contact pickup inputs and external actuators are future hardware investigations. Use TALORA's typed patching architecture where qualified. See [`FIELD-KIT-INSPIRED-UTILITIES.md`](FIELD-KIT-INSPIRED-UTILITIES.md) for rationale, safety limits and patch-recipe ideas.
+
 **Out of scope:** recording/export, sample harvesting, cloud user accounts, livestream relay service, Windows parity, raw RF sensing without SDR, full Eurorack simulation.
 
 ## Experience acceptance
