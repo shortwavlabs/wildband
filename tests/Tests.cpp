@@ -723,6 +723,7 @@ void strikeNeutral()
         const auto radio = noise ((size_t) fs * 20, 0.2f);
         Buf l (4800), r (4800), l0 (4800), r0 (4800);
         std::array<float, 3> ratio {};                                    // cabled / bare RMS: during hits, late in the silence, after resuming
+        float held = 0;                                                   // ...and 3 s into the silence
         for (int block = 0; block < 200; ++block)
         {
             const double t = block * 0.1;
@@ -732,10 +733,12 @@ void strikeNeutral()
             c.plan = plan (audio);
             bare.process (radio.data() + block * 4800, radio.data() + block * 4800, radio.data(), l0.data(), r0.data(), 4800, c);
             if (block == 15) ratio[0] = rms (l) / rms (l0);
+            if (block == 50) held = rms (l) / rms (l0);
             if (block == 175) ratio[1] = rms (l) / rms (l0);
             if (block == 195) ratio[2] = rms (l) / rms (l0);
         }
         CHECK (ratio[0] > 2.0f);                                          // hits strike: much louder than the bare patch
+        CHECK (held < 0.5f);                                              // 3 s after the last hit the back-off is still fully held (dimmer than bare)
         CHECK (std::abs (ratio[1] - 1.0f) < 0.01f);                       // 15.5 s into the silence: within 1 % of no cable
         CHECK (ratio[2] > 2.0f);                                          // and back
     }
