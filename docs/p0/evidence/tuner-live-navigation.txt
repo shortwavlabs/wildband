@@ -1,0 +1,19 @@
+0.2 s | no device | CONNECTING | buffer 0.0 s | underruns 0 | reconnects 0 | callbacks 0 | late 0 | max gap ms 0.0 | faults 0 | SomaFM Groove Salad | gap 0.00 | static 0.00 | connects 1 | ROOM off | 
+5.0 s | MiniFuse 1 | LIVE | buffer 6.0 s | underruns 0 | reconnects 0 | callbacks 469 | late 0 | max gap ms 10.7 | faults 0 | SomaFM Groove Salad | gap 0.00 | static 0.00 | connects 1 | ROOM off | 
+10.0 s | MiniFuse 1 | LIVE | buffer 6.0 s | underruns 0 | reconnects 0 | callbacks 969 | late 0 | max gap ms 10.7 | faults 0 | SomaFM Groove Salad | gap 0.00 | static 0.00 | connects 1 | ROOM off | 
+12.2 s | MiniFuse 1 | CONNECTING | buffer 0.0 s | underruns 0 | reconnects 0 | callbacks 1188 | late 0 | max gap ms 10.7 | faults 0 | KEXP Seattle | gap 1.00 | static 0.50 | connects 2 | ROOM off | 
+12.4 s | MiniFuse 1 | CONNECTING | buffer 0.0 s | underruns 0 | reconnects 0 | callbacks 1208 | late 0 | max gap ms 10.7 | faults 0 | KEXP Seattle | gap 1.00 | static 0.50 | connects 2 | ROOM off | 
+12.6 s | MiniFuse 1 | CONNECTING | buffer 0.0 s | underruns 0 | reconnects 0 | callbacks 1228 | late 0 | max gap ms 10.7 | faults 0 | KEXP Seattle | gap 1.00 | static 0.50 | connects 2 | ROOM off | 
+12.8 s | MiniFuse 1 | CONNECTING | buffer 0.0 s | underruns 0 | reconnects 0 | callbacks 1248 | late 0 | max gap ms 10.7 | faults 0 | KEXP Seattle | gap 1.00 | static 0.50 | connects 2 | ROOM off | 
+13.0 s | MiniFuse 1 | CONNECTING | buffer 0.0 s | underruns 0 | reconnects 0 | callbacks 1268 | late 0 | max gap ms 10.7 | faults 0 | KEXP Seattle | gap 1.00 | static 0.50 | connects 2 | ROOM off | 
+13.2 s | MiniFuse 1 | CONNECTING | buffer 0.0 s | underruns 0 | reconnects 0 | callbacks 1288 | late 0 | max gap ms 10.7 | faults 0 | KEXP Seattle | gap 1.00 | static 0.50 | connects 2 | ROOM off | 
+13.4 s | MiniFuse 1 | CONNECTING | buffer 0.0 s | underruns 0 | reconnects 0 | callbacks 1308 | late 0 | max gap ms 10.7 | faults 0 | KEXP Seattle | gap 1.00 | static 0.50 | connects 2 | ROOM off | 
+15.0 s | MiniFuse 1 | LIVE | buffer 6.0 s | underruns 0 | reconnects 0 | callbacks 1468 | late 0 | max gap ms 10.7 | faults 0 | KEXP Seattle | gap 0.00 | static 0.00 | connects 2 | ROOM off | 
+20.0 s | MiniFuse 1 | LIVE | buffer 5.9 s | underruns 0 | reconnects 0 | callbacks 1967 | late 0 | max gap ms 10.7 | faults 0 | KEXP Seattle | gap 0.00 | static 0.00 | connects 2 | ROOM off | 
+22.2 s | MiniFuse 1 | CONNECTING | buffer 0.0 s | underruns 0 | reconnects 0 | callbacks 2203 | late 0 | max gap ms 10.7 | faults 0 | Radio Paradise | gap 1.00 | static 0.50 | connects 3 | ROOM off | 
+22.4 s | MiniFuse 1 | CONNECTING | buffer 0.0 s | underruns 0 | reconnects 0 | callbacks 2223 | late 0 | max gap ms 10.7 | faults 0 | SomaFM Groove Salad | gap 1.00 | static 0.50 | connects 3 | ROOM off | 
+22.6 s | MiniFuse 1 | CONNECTING | buffer 0.0 s | underruns 0 | reconnects 0 | callbacks 2244 | late 0 | max gap ms 10.7 | faults 0 | SomaFM Groove Salad | gap 1.00 | static 0.50 | connects 4 | ROOM off | 
+25.0 s | MiniFuse 1 | LIVE | buffer 6.0 s | underruns 0 | reconnects 0 | callbacks 2497 | late 0 | max gap ms 10.7 | faults 0 | SomaFM Groove Salad | gap 0.00 | static 0.00 | connects 4 | ROOM off | 
+30.0 s | MiniFuse 1 | LIVE | buffer 6.0 s | underruns 0 | reconnects 0 | callbacks 3029 | late 0 | max gap ms 10.7 | faults 0 | SomaFM Groove Salad | gap 0.00 | static 0.00 | connects 4 | ROOM off | 
+32.2 s | MiniFuse 1 | CONNECTING | buffer 0.0 s | underruns 0 | reconnects 0 | callbacks 3261 | late 0 | max gap ms 10.7 | faults 0 | SomaFM SF 10-33 | gap 1.00 | static 0.50 | connects 5 | ROOM off | 
+35.0 s | MiniFuse 1 | LIVE | buffer 6.0 s | underruns 0 | reconnects 0 | callbacks 3561 | late 0 | max gap ms 10.7 | faults 0 | SomaFM SF 10-33 | gap 0.00 | static 0.00 | connects 5 | ROOM off | 

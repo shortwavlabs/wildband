@@ -1,0 +1,17 @@
+device 110 "LG HDR 4K" in 0 out 2
+device 105 "MiniFuse 1" in 4 out 4  <- default output
+device 76 "BlackHole 2ch" in 2 out 2
+device 100 "MacBook Pro Microphone" in 1 out 0
+device 93 "MacBook Pro Speakers" in 0 out 2
+     34 ms  START probe  [microphone: undetermined]
+     34 ms  BEGIN AUHAL, input disabled, on output-only "MacBook Pro Speakers": open, run 1 s, close  [microphone: undetermined]
+   1119 ms  END   AUHAL, input disabled, on output-only "MacBook Pro Speakers": open, run 1 s, close -> ok, 93 output callbacks in 1 s (1085 ms)  [microphone: undetermined]
+   1120 ms  BEGIN AUHAL, input disabled, on duplex "MiniFuse 1": open, run 1 s, close  [microphone: undetermined]
+   2212 ms  END   AUHAL, input disabled, on duplex "MiniFuse 1": open, run 1 s, close -> ok, 94 output callbacks in 1 s (1092 ms)  [microphone: undetermined]
+   2212 ms  BEGIN raw IOProc on output-only "MacBook Pro Speakers": create, start, run 1 s, stop, destroy  [microphone: undetermined]
+   3284 ms  END   raw IOProc on output-only "MacBook Pro Speakers": create, start, run 1 s, stop, destroy -> ok, 93 output callbacks in 1 s (1072 ms)  [microphone: undetermined]
+   3284 ms  BEGIN raw IOProc on duplex "MiniFuse 1": create only, destroy  [microphone: undetermined]
+   3290 ms  END   raw IOProc on duplex "MiniFuse 1": create only, destroy -> ok, created (6 ms)  [microphone: undetermined]
+   3290 ms  BEGIN raw IOProc on duplex "MiniFuse 1": create, start, run 1 s, stop, destroy  [microphone: undetermined]
+   4498 ms  END   raw IOProc on duplex "MiniFuse 1": create, start, run 1 s, stop, destroy -> ok, 93 output callbacks in 1 s (1208 ms)  [microphone: undetermined]
+   4498 ms  DONE  probe  [microphone: undetermined]

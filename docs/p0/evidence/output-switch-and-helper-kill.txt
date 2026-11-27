@@ -1,0 +1,17 @@
+5 s | MiniFuse 1 | LIVE | buffer 6.0 s | underruns 0 | reconnects 0 | callbacks 460 | late 0 | max gap ms 10.7 | faults 0 | ROOM off | Starting ROOM
+10 s | MiniFuse 1 | LIVE | buffer 6.0 s | underruns 0 | reconnects 0 | callbacks 947 | late 0 | max gap ms 10.7 | faults 0 | ROOM on | ROOM is listening on MiniFuse 1 (never played or stored)
+15 s | MiniFuse 1 | LIVE | buffer 6.0 s | underruns 0 | reconnects 0 | callbacks 1433 | late 0 | max gap ms 10.7 | faults 0 | ROOM on | ROOM is listening on MiniFuse 1 (never played or stored)
+-- output MiniFuse 1 -> MacBook Pro Speakers ok
+20 s | MacBook Pro Speakers | LIVE | buffer 6.0 s | underruns 0 | reconnects 0 | callbacks 480 | late 0 | max gap ms 10.7 | faults 0 | ROOM on | ROOM is listening on MiniFuse 1 (never played or stored)
+25 s | MacBook Pro Speakers | LIVE | buffer 6.0 s | underruns 0 | reconnects 0 | callbacks 966 | late 0 | max gap ms 10.7 | faults 0 | ROOM on | ROOM is listening on MiniFuse 1 (never played or stored)
+30 s | MacBook Pro Speakers | LIVE | buffer 6.0 s | underruns 0 | reconnects 0 | callbacks 1451 | late 0 | max gap ms 10.7 | faults 0 | ROOM on | ROOM is listening on MiniFuse 1 (never played or stored)
+-- output MacBook Pro Speakers -> MiniFuse 1 ok
+35 s | MiniFuse 1 | LIVE | buffer 6.0 s | underruns 0 | reconnects 0 | callbacks 482 | late 0 | max gap ms 10.7 | faults 0 | ROOM on | ROOM is listening on MiniFuse 1 (never played or stored)
+40 s | MiniFuse 1 | LIVE | buffer 6.0 s | underruns 0 | reconnects 0 | callbacks 968 | late 0 | max gap ms 10.7 | faults 0 | ROOM on | ROOM is listening on MiniFuse 1 (never played or stored)
+45 s | MiniFuse 1 | LIVE | buffer 6.0 s | underruns 0 | reconnects 0 | callbacks 1453 | late 0 | max gap ms 10.7 | faults 0 | ROOM on | ROOM is listening on MiniFuse 1 (never played or stored)
+-- test: kill -9 helper pid 3438 at ~52 s
+50 s | MiniFuse 1 | LIVE | buffer 6.0 s | underruns 0 | reconnects 0 | callbacks 1940 | late 0 | max gap ms 10.7 | faults 0 | ROOM on | ROOM is listening on MiniFuse 1 (never played or stored)
+55 s | MiniFuse 1 | LIVE | buffer 6.0 s | underruns 0 | reconnects 0 | callbacks 2425 | late 0 | max gap ms 10.7 | faults 0 | ROOM off | ROOM stopped (the WILDBAND Room helper is not running)
+60 s | MiniFuse 1 | LIVE | buffer 6.0 s | underruns 0 | reconnects 0 | callbacks 2912 | late 0 | max gap ms 10.7 | faults 0 | ROOM off | ROOM stopped (the WILDBAND Room helper is not running)
+-- test: helper processes after kill: 0
+65 s | MiniFuse 1 | LIVE | buffer 6.0 s | underruns 0 | reconnects 0 | callbacks 3397 | late 0 | max gap ms 10.7 | faults 0 | ROOM off | ROOM stopped (the WILDBAND Room helper is not running)
