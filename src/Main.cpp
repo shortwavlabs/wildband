@@ -24,6 +24,10 @@ juce::Colour moduleColour (int module) { return module == kModRadio ? kRadio : m
 
 bool roomAtStart = false;   // --room (test aid)
 juce::String statusLogPath; // --log=FILE (test aid): one status line every 5 s
+// Settings profile. This build keeps its settings in "WILDBAND-<profile>.settings", NOT in the "WILDBAND.settings" file
+// the four earlier audition builds share, so playing with one can no longer change what another one starts with.
+// --profile=NAME picks another profile (e.g. one per comparison). A new profile starts as a copy of the shared file.
+juce::String settingsProfile = "integration";
 bool navTest = false;       // --nav-test (test aid): NEXT at 12 s, five quick NEXTs at 22 s, PREVIOUS at 32 s
 bool switchTest = false;    // --switch-test (test aid): move the output to the built-in speakers and back while playing
 
@@ -478,9 +482,13 @@ public:
         outputOverride = output.startsWith ("snapshot:") ? juce::String() : output;
         snapshotPath = output.startsWith ("snapshot:") ? output.fromFirstOccurrenceOf (":", false, false) : juce::String();
         juce::PropertiesFile::Options options;
-        options.applicationName = "WILDBAND";
+        options.applicationName = "WILDBAND-" + settingsProfile;
         options.filenameSuffix = "settings";
         options.osxLibrarySubFolder = "Application Support";
+        {
+            const auto mine = options.getDefaultFile(), shared = mine.getSiblingFile ("WILDBAND.settings");
+            if (! mine.existsAsFile() && shared.existsAsFile()) shared.copyFileTo (mine);    // first run: start from the owner's existing setup; the shared file itself is never written
+        }
         settings.setStorageParameters (options);
         setLookAndFeel (&look);
        #if WILDBAND_HAS_KNOB
@@ -552,6 +560,7 @@ public:
         for (auto* c : std::initializer_list<juce::Component*> { &roomButton, &learn, &audioButton, &panicButton, &setUrl, &urlEditor, &dialView, &status, &hint, &patch, &title })
             addAndMakeVisible (c);
         title.setText ("WILDBAND  P0", juce::dontSendNotification);
+        title.setTooltip ("Settings profile: " + settingsProfile + "  (WILDBAND-" + settingsProfile + ".settings)");
         title.setFont (juce::FontOptions (20.0f, juce::Font::bold));
         title.setColour (juce::Label::textColourId, kOrange);
         status.setFont (juce::FontOptions (13.0f));
@@ -1209,6 +1218,8 @@ public:
             }
 
         roomAtStart = commandLine.contains ("--room");
+        for (const auto& arg : juce::StringArray::fromTokens (commandLine, true))
+            if (arg.startsWith ("--profile=")) settingsProfile = juce::File::createLegalFileName (arg.fromFirstOccurrenceOf ("=", false, false).unquoted()).replaceCharacter (' ', '-');
         switchTest = commandLine.contains ("--switch-test");
         navTest = commandLine.contains ("--nav-test");
         for (const auto& arg : juce::StringArray::fromTokens (commandLine, true))

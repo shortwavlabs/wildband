@@ -1,5 +1,13 @@
 # WILDBAND P0 — TALORA patching reuse assessment
 
+> **Owner authorization, 2026-11-27.** Reuse of TALORA's *architectural concepts* in WILDBAND is approved: typed
+> patching, routing validation, graph management and real-time-safe communication patterns. The existing
+> `PlanMailbox` (`src/Patch.h`) may remain public in PRs #4, #5 and #6; no replacement or history rewrite is needed.
+> This is **not** authorization to publish TALORA's private codebase, its Mutable Instruments integrations,
+> third-party assets or dependencies. Provenance of each derived piece stays recorded here and in
+> `LICENSING-AND-PROVENANCE.md`. Derived so far: `Graph::check` and the port/connection types (PR #3),
+> `PlanMailbox` (PR #4). Nothing else.
+
 **Inspected:** `shortwavlabs/modulo` (the repository that contains TALORA), branch `development` at `91cc748`
 ("Phase P2-beta"), on this Mac. Files read: `src/engine/Routing.{h,cpp}`, `src/control/PatchController.{h,cpp}`,
 the plan hand-off in `src/engine/ModuloEngine.{h,cpp}`, the two editors' headers, `README.md`,

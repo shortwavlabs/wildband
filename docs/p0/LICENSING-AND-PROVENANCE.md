@@ -1,5 +1,50 @@
 # WILDBAND — Licensing and provenance inventory (for owner approval)
 
+> **Update, 2026-11-27 (second pass) — see section 0.** The owner has confirmed the JUCE route (AGPLv3 option) and
+> sole authorship of Korupt, Wyrd and Drift, and has authorized reuse of TALORA's architectural concepts. The
+> delegated inventory has been re-verified first-hand, and the Vult-generated code has been reproduced byte for
+> byte. **The licence itself is still not applied**: no `LICENSE` file or headers exist yet.
+
+## 0. Second pass: decisions recorded and verification completed
+
+### Owner decisions (recorded verbatim in substance)
+
+| Decision | Recorded |
+|---|---|
+| **JUCE licensing route** | "AGPLv3 option" (owner's answer, 2026-11-27). No commercial JUCE licence covers WILDBAND, so a distributed WILDBAND must be AGPL-3.0 as a whole |
+| **Authorship of Korupt, Wyrd, Drift and their `.vult` sources** | "Yes, solely mine" (owner's answer, 2026-11-27), reusable in WILDBAND under GPL-3.0-or-later terms |
+| **TALORA reuse** | Authorized: reuse of TALORA's **architectural concepts** — typed patching, routing validation, graph management and real-time-safe communication patterns — and the existing `PlanMailbox` may remain public in PRs #4, #5 and #6 with no replacement or history rewrite. **Not authorized:** publishing TALORA's private codebase as such, its Mutable Instruments integrations, third-party assets or dependencies |
+| Proposed licence | AGPL-3.0-only remains the direction; **not yet applied** |
+
+### What was re-verified first-hand in this pass
+
+| Item | How | Result |
+|---|---|---|
+| Authors of the candidate DSP files | `git log --format=%an -- <path>` in `vcv-tapestry` for `korupt-dsp.h`, `wyrd-dsp.h`, `drif-dsp.h`, `src/dsp/generated`, `src/dsp/vult` | Only the owner; no co-author trailers on those paths |
+| Third-party code actually compiled into the app | Compiler dependency files of the WILDBAND target | HarfBuzz, SheenBidi, IJG jpeglib, LunaSVG (with PlutoVG), libpng, zlib. From `juce_audio_formats/codecs` only JUCE's own wrapper headers — no FLAC, Vorbis, Opus, VST3, LV2, ASIO or Oboe source |
+| JUCE's declared licence | `JUCE.spdx.json` | 28 packages `AGPL-3.0-only OR LicenseRef-JUCE-Commercial` |
+| GPLv3 ↔ AGPLv3 combination | Text of GPLv3 §13 in `vcv-tapestry/LICENSE.md` | "you have permission to link or combine any covered work with a work licensed under version 3 of the GNU Affero General Public License into a single combined work… The terms of this License will continue to apply to the part which is the covered work" |
+| Rack SDK terms | `Rack-SDK/LICENSE.html` | GPLv3-or-later; the plugin exception covers *using the API from a plugin distributed free of charge*; "plugins that copy a significant portion of non-API source code from Rack must be licensed under GPLv3" |
+| Vult runtime licence | Header of `vultin.h` / `vultin.cpp` | MIT, © 2015 Leonardo Laguna Ruiz |
+| **Vult reproducibility** | Ran the installed compiler (`vultc` v0.4.15, npm package `vult`, MIT) on the committed `.vult` sources: `vultc -ccode drift_core.vult -o drift_core`, likewise `wyrd_core` | **All six generated files (`.h`, `.cpp`, `.tables.h` for both cores) are byte-identical to the committed ones.** The generated DSP is reproducible from the owner's sources with a known compiler version. (The `make generate-vult` target the sources mention still does not exist; the command above is what it should run) |
+
+Still from the delegated survey and not re-checked: the per-branch commit counts, the exact module list from build
+flags, and the description of `modulo`'s vendored Mutable Instruments tree.
+
+### What this unblocks, and what it does not
+
+| Area | Status |
+|---|---|
+| WILDBAND's own code, the TALORA-concept code in `src/Patch.h` | **Clear** to be licensed AGPL-3.0-only once the owner says "apply it" |
+| Wyrd and Drift (plain C++ and Vult output) | Provenance clear. May be brought in as GPL-3.0-or-later files with their notices and the MIT notice for the Vult runtime, **after** WILDBAND's licence is applied. Until then they are studied in place, from their own repository |
+| Korupt | Provenance clear, but it uses VCV Rack SDK types. **Do not copy the Rack types**: replace `RCFilter`, the slew limiter and exponential filter with WILDBAND's own one-poles (they are a few lines of textbook DSP each) and `rack::math::clamp` with `std::clamp`. Blocked until that rewrite and the licence application |
+| AFTERIMAGE code | Same licence as proposed (AGPL-3.0-only). Its Freesound test recordings are **not** to be reused: WILDBAND's research fixtures are synthesized (see `VOICE-RESEARCH.md`) |
+| Unrelated WILDBAND work (integration, STRIKE, tuner, research harness, WILDBAND's own new DSP) | **Not blocked** |
+
+Rule kept throughout: a file with no licence header is not free to reuse; its repository's licence and its authorship decide.
+
+---
+
 **Date:** 2026-11-27. **Proposed licence for WILDBAND's own code: `AGPL-3.0-only`**, matching AFTERIMAGE and JUCE's
 open-source option. **Nothing has been applied:** no `LICENSE` file, no SPDX headers, no notices have been added.
 This document is the inventory and the list of decisions; applying it waits for the owner's approval.
@@ -124,12 +169,11 @@ Modelled on AFTERIMAGE, for consistency:
 
 ## 5. Decisions for the owner
 
-1. **Approve AGPL-3.0-only** for WILDBAND, name the copyright holder for the headers, and confirm whether a
-   commercial JUCE licence is held.
-2. **Authorize, or not, `PlanMailbox`** specifically. If not: it is replaced and the PR #4 branch rewritten.
+1. **Say "apply it"** for AGPL-3.0-only, and name the copyright holder for the headers. (JUCE route: confirmed AGPLv3.)
+2. ~~Authorize, or not, `PlanMailbox`.~~ **Authorized** (section 0).
 3. Confirm Shortwav Labs holds all rights in TALORA's routing layer and is content for the derived `Patch.h` to be
    AGPL-licensed in a public repository.
-4. Confirm sole authorship of Korupt, Wyrd, Drift and their `.vult` sources before Task D ports anything.
+4. ~~Confirm sole authorship of Korupt, Wyrd, Drift and their `.vult` sources.~~ **Confirmed** (section 0).
 5. Decide how AI-assisted contributions are recorded (the co-author trailers here, Copilot commits in tapestry).
 
 ## 6. Questions for a lawyer, not an engineer
