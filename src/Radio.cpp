@@ -137,6 +137,9 @@ void Radio::tune (const juce::String& newUrl)
         if (newUrl == url) return;
         url = newUrl;
         detailText.clear();
+        const auto now = juce::Time::getMillisecondCounter();
+        if (now - lastTuneMs.load() < (juce::uint32) kSettleMs) burst = true;   // a quick succession of requests: only the last one connects
+        lastTuneMs = now;
         ++gen;
         phase = url.isEmpty() ? Phase::Idle : Phase::Connecting;
         if (activeStream != nullptr) activeStream->cancel();
@@ -191,6 +194,7 @@ void Radio::read (float* left, float* right, int n) noexcept
         fifo.finishedRead (fifo.getNumReady());
         readerGen = sg;
         ackGen = sg;
+        playedThisGen = false;
     }
 
     int ready = fifo.getNumReady();
@@ -220,6 +224,11 @@ void Radio::read (float* left, float* right, int n) noexcept
         right[i] *= gain;
     }
     readerPlaying = playing;
+
+    if (playing && gain >= 1.0f) playedThisGen = true;
+    const auto ph = phase.load (std::memory_order_relaxed);
+    const bool fetching = ph != Phase::Idle && ph != Phase::Failed && (readerGen != g || ! playedThisGen);
+    tuneGap.store (fetching ? 1.0f - gain : 0.0f, std::memory_order_relaxed);
 }
 
 // ---- receiver thread ------------------------------------------------------------------------------------------------
@@ -256,6 +265,12 @@ void Radio::run()
         { const juce::ScopedLock sl (lock); u = url; myGen = gen.load(); }
         if (u.isEmpty()) { sessionGen = myGen; phase = Phase::Idle; wait (-1); continue; }
 
+        if (burst.load())                                    // the player is skipping through stations: connect only once
+        {                                                    // requests have stopped for kSettleMs (a single request never waits)
+            const auto quiet = juce::Time::getMillisecondCounter() - lastTuneMs.load();
+            if (quiet < (juce::uint32) kSettleMs) { wait (kSettleMs - (int) quiet); continue; }   // then look again: the address may have changed
+            burst = false;
+        }
         sessionGen = myGen;
         gotAudio = false;
         if (phase.load() != Phase::Reconnecting) phase = Phase::Connecting;
@@ -286,6 +301,7 @@ Radio::End Radio::runSession (const juce::String& address, double fs, int myGen,
     } active (*this, &stream);
 
     if (! current (myGen)) return End::Superseded;
+    if (depth == 0) connects.fetch_add (1);
     if (! stream.connect (nullptr)) { if (current (myGen)) setDetail ("could not connect"); return End::Retry; }
     const int status = stream.getStatusCode();
     if (status != 200)

@@ -123,6 +123,7 @@ void testBounded()
             if (trial > 1) c.p[kFeedback] = 1.0f;                                    // feedback at the stop in most trials
             c.mode = (Mode) (trial % 3);
             c.detune = u (rng);
+            c.gap = trial % 3 == 0 ? 0.0f : u (rng) * 2.0f;                          // CT-11: tuner static in the hostile runs
             c.room = { u (rng) * 3.0f, u (rng) * 3.0f, u (rng) * 3.0f };             // out-of-range room values too
             if (trial % 4 == 3) c.plan = garbagePlan (rng);                          // garbage plans too
             else if (trial % 4 == 1)                                                // AT-08: every destination at -1 or +1
@@ -151,6 +152,7 @@ void testDeterministicAndBlockInvariant()
     const float mixed[] = { -1.0f, 0.4f, -0.6f, 1.0f, -0.25f, 0.8f };
     for (int in = kResPitchIn; in < kNumPorts; ++in) depths.setDepth (depths.cableInto (in), in, mixed[in - kResPitchIn]);
     c.plan = RoutingPlan::fromGraph (depths);
+    c.gap = 1.0f; c.p[kStatic] = 0.8f;                                              // CT-11: with tuner static playing
     Buf ref;
     for (int block : { 1, 64, 1000, 0 })
     {
@@ -427,6 +429,7 @@ void testNoAllocation()
     for (int b = 0; b < 4000; ++b)
     {
         c.p[b % kNumParams] = (float) (b % 17) / 16.0f;
+        c.gap = (b / 400) % 2 ? 1.0f : 0.0f;                                         // CT-11: static starting and stopping
         c.mode = (Mode) ((b / 500) % 3);
         bus.publish (kEnvMicrophone, room.process (x.data(), 64), b);
         c.room = bus.read (b);
@@ -847,6 +850,8 @@ void all()
 // Playable tuner acceptance tests: docs/p0/TUNER-ACCEPTANCE.md
 namespace tuner
 {
+float staticDb = 0;   // CT-12, reported by --metrics
+
 /** CT-01: the off-centre TUNE sound the owner singled out must not change. Reference: the frozen P0 engine. */
 void offCentreRegression()
 {
@@ -889,9 +894,167 @@ void offCentreRegression()
     CHECK (compared == 30);
 }
 
+Buf mono (Engine& e, const Buf& radio, const Controls& c)
+{
+    Buf l (radio.size()), r (radio.size());
+    const Buf local (radio.size(), 0.0f);
+    for (size_t at = 0; at + 64 <= radio.size(); at += 64) e.process (radio.data() + at, radio.data() + at, local.data() + at, l.data() + at, r.data() + at, 64, c);
+    return l;
+}
+Buf part (const Buf& x, double fromSeconds, double toSeconds, double fs = 48000.0) { return Buf (x.begin() + (long) (fromSeconds * fs), x.begin() + (long) (toSeconds * fs)); }
+
+void staticOffIsTheOldBehaviour()   // CT-02
+{
+    currentTest = "CT-02 STATIC 0 is the old behaviour";
+    const auto radio = testSource (48000.0, 48000 * 2);
+    auto c = defaults();
+    c.p[kStatic] = 0.0f;
+    Engine a, b;
+    a.prepare (48000.0); b.prepare (48000.0);
+    const auto none = mono (a, radio, c);
+    c.gap = 1.0f;
+    CHECK (depth::same (none, mono (b, radio, c)));
+    CHECK (b.meterStatic.load() == 0.0f);
+}
+
+void levelAndShape()   // CT-12
+{
+    currentTest = "CT-12 level and shape";
+    for (double fs : { 44100.0, 48000.0, 96000.0 })
+    {
+        StaticSource s;
+        s.prepare (fs);
+        Buf x ((size_t) fs * 10);
+        for (auto& v : x) v = s.next();
+        double mean = 0;
+        for (auto v : x) mean += v;
+        const float db = 20.0f * std::log10 (paramDefaults[kStatic] * rms (x));
+        CHECK (db > -30.0f && db < -14.0f);
+        CHECK (peak (x) <= StaticSource::kPeak);
+        CHECK (std::abs (mean / (double) x.size()) < 0.001);
+        if (fs == 48000.0) staticDb = db;
+    }
+    StaticSource a, b;                                                             // deterministic
+    a.prepare (48000.0); b.prepare (48000.0);
+    bool identical = true;
+    for (int i = 0; i < 10000; ++i) identical = identical && a.next() == b.next();
+    CHECK (identical);
+}
+
+void timeBound()   // CT-13
+{
+    currentTest = "CT-13 time bound";
+    auto c = defaults();
+    c.p[kStatic] = 1.0f; c.mode = Mode::Dry;                                        // DRY shows the engine's input, static included
+    Engine e;
+    e.prepare (48000.0);
+    const Buf silence (48000 * 12, 0.0f);
+    c.gap = 1.0f;
+    const auto y = mono (e, silence, c);
+    const float early = rms (part (y, 1.0, 3.5)), late = rms (part (y, 3.5, 3.9)), fading = rms (part (y, 5.5, 6.5));
+    CHECK (early > 1.0e-3f);
+    CHECK (std::abs (late / early - 1.0f) < 0.25f);                                 // still at full strength just before 4 s
+    CHECK (fading < 0.8f * early && fading > 0.0f);                                 // fading between 4 and 8 s
+    CHECK (peak (part (y, 8.2, 12.0)) == 0.0f);                                     // silent from 8 s
+    const auto more = mono (e, Buf (48000 * 2, 0.0f), c);                           // the gap is still open: it does not start again
+    CHECK (peak (more) == 0.0f);
+    c.gap = 0.0f;
+    mono (e, Buf (4800, 0.0f), c);                                                  // the gap closes...
+    c.gap = 1.0f;
+    CHECK (rms (part (mono (e, Buf (48000, 0.0f), c), 0.2, 1.0)) > 1.0e-3f);        // ...and the next retune has static again
+}
+
+void throughTheEngine()   // CT-14
+{
+    currentTest = "CT-14 static goes through the engine";
+    auto c = defaults();
+    c.p[kStatic] = 1.0f; c.p[kMix] = 1.0f; c.p[kFeedback] = 0.7f; c.gap = 1.0f;
+    const Buf silence (48000 * 2, 0.0f);
+    Engine e;
+    e.prepare (48000.0);
+    const auto rung = mono (e, silence, c);
+    CHECK (rms (part (rung, 0.5, 2.0)) > 1.0e-3f);                                  // MIX fully right: this is resonator output only
+    CHECK (e.meterRadioLevel.load() > 0.2f);                                        // the radio LEVEL output responds to it
+    Engine bare;
+    bare.prepare (48000.0);
+    auto pulled = c;
+    pulled.plan = RoutingPlan::fromGraph (Graph());                                 // no audio cable: static cannot reach the resonators
+    CHECK (peak (mono (bare, silence, pulled)) == 0.0f);
+    Engine detuned;                                                                 // and the off-centre ring modulator acts on it
+    detuned.prepare (48000.0);
+    auto off = c;
+    off.detune = 1.0f;
+    CHECK (! depth::same (rung, mono (detuned, silence, off)));
+}
+
+void tails()   // CT-09
+{
+    currentTest = "CT-09 tails survive a retune";
+    const double fs = 48000.0;
+    Buf radio = noise ((size_t) fs * 4, 0.3f);
+    std::fill (radio.begin() + (long) fs, radio.begin() + (long) (fs * 2.5), 0.0f);  // the station is gone from 1.0 s to 2.5 s
+    auto c = defaults();
+    c.p[kFeedback] = 0.68f; c.p[kMix] = 1.0f; c.p[kStatic] = 0.0f;
+    Engine plain, retuned;
+    plain.prepare (fs); retuned.prepare (fs);
+    const auto reference = mono (plain, radio, c);                                   // the same samples with no retune signalled
+    Buf out;
+    for (int block = 0; block < 40; ++block)                                         // 0.1 s blocks; the gap is open while the station is gone
+    {
+        c.gap = block >= 10 && block < 25 ? 1.0f : 0.0f;
+        const auto y = mono (retuned, Buf (radio.begin() + block * 4800, radio.begin() + (block + 1) * 4800), c);
+        out.insert (out.end(), y.begin(), y.end());
+    }
+    CHECK (depth::same (reference, out));                                            // STATIC 0: a retune touches nothing
+    CHECK (rms (part (out, 1.05, 1.5)) > 1.0e-4f);                                   // and the tail is audibly there after the station has gone
+
+    c.p[kStatic] = 0.6f;                                                             // with static: the tail carries on underneath, no step
+    Engine withStatic;
+    withStatic.prepare (fs);
+    Buf out2;
+    for (int block = 0; block < 40; ++block)
+    {
+        c.gap = block >= 10 && block < 25 ? 1.0f : 0.0f;
+        const auto y = mono (withStatic, Buf (radio.begin() + block * 4800, radio.begin() + (block + 1) * 4800), c);
+        out2.insert (out2.end(), y.begin(), y.end());
+    }
+    CHECK (depth::same (part (reference, 0.0, 1.0), part (out2, 0.0, 1.0)));         // identical until the gap opens
+    float step = 0;
+    for (size_t i = 48000 - 200; i < 48000 + 2400; ++i) step = std::max (step, std::abs (out2[i] - out2[i - 1]));
+    float before = 0;
+    for (size_t i = 48000 - 2400; i < 48000 - 200; ++i) before = std::max (before, std::abs (reference[i] - reference[i - 1]));
+    CHECK (step < before + 0.05f);                                                   // no click where static comes in
+    CHECK (rms (part (out2, 1.5, 2.4)) > rms (part (reference, 1.5, 2.4)));          // static keeps the resonators excited through the wait
+}
+
+void panicDuringStatic()   // CT-10
+{
+    currentTest = "CT-10 PANIC during static";
+    auto c = defaults();
+    c.p[kStatic] = 1.0f; c.p[kFeedback] = 1.0f; c.p[kLevel] = 1.0f; c.gap = 1.0f;
+    Engine e;
+    e.prepare (48000.0);
+    const Buf silence (48000, 0.0f);
+    CHECK (peak (mono (e, silence, c)) > 0.0f);
+    e.panic();
+    CHECK (peak (mono (e, silence, c)) == 0.0f);                                    // exactly silent for the rest of this retune
+    CHECK (peak (mono (e, silence, c)) == 0.0f);
+    c.gap = 0.0f;
+    const auto live = noise (48000, 0.3f);
+    CHECK (peak (mono (e, live, c)) > 0.0f);                                        // the station arrives and plays
+    c.gap = 1.0f;
+    CHECK (peak (mono (e, silence, c)) > 0.0f);                                     // and the next retune has static again
+}
+
 void all()
 {
     offCentreRegression();
+    staticOffIsTheOldBehaviour();
+    levelAndShape();
+    timeBound();
+    throughTheEngine();
+    tails();
+    panicDuringStatic();
 }
 } // namespace tuner
 
@@ -924,6 +1087,7 @@ void metrics()
         std::printf ("%-34s %8.1f %8.1f %8.1f %10.0f\n", s.name, 20 * std::log10 (r + 1e-9f), 20 * std::log10 (p + 1e-9f), 20 * std::log10 (p / (r + 1e-9f)), 0.5 * zc / 8.0);
     }
 
+    std::printf ("\nTuner static at the default STATIC setting: %.1f dBFS RMS at the engine's radio input (48 kHz)\n", (double) tuner::staticDb);
     // synthetic cost of Engine::process alone, single thread, no audio device: NOT a CoreAudio measurement
     std::printf ("\nEngine::process cost, synthetic (48 kHz, block 64, 20 s of audio per row)\n%-28s %14s\n", "input", "ns per sample");
     for (int kind = 0; kind < 2; ++kind)

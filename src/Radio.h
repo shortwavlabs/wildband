@@ -27,7 +27,13 @@ public:
     State state() const noexcept;
     juce::String detail() const;                 // codec and station on success, the reason on failure
     double bufferedSeconds() const noexcept;
-    std::atomic<int> underruns { 0 }, reconnects { 0 };
+    std::atomic<int> underruns { 0 }, reconnects { 0 }, connects { 0 };   // connects: connection attempts started
+
+    /** How much of the sound is missing because the receiver is fetching a station the player just asked for:
+        0 while a station plays, rising to 1 as the old one fades, back to 0 as the new one fades in. Stays 0 for a
+        spontaneous dropout of a station that was playing, and when idle or failed. The tuner static follows this,
+        so it lasts exactly as long as the real wait. Written by read(). */
+    std::atomic<float> tuneGap { 0.0f };
 
     static const char* name (State) noexcept;
 
@@ -57,9 +63,13 @@ private:
     std::atomic<Phase> phase { Phase::Idle };
     std::atomic<bool> readerPlaying { false }, gotAudio { false };
 
+    static constexpr int kSettleMs = 150;            // requests closer together than this are coalesced into the last one
+    std::atomic<bool> burst { false };
+    std::atomic<juce::uint32> lastTuneMs { 0 };
+
     // audio thread state
     int readerGen = -1;
-    bool playing = false;
+    bool playing = false, playedThisGen = false;
     float gain = 0.0f;
 };
 
