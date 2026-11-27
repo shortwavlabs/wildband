@@ -385,7 +385,7 @@ private:
         const float strike = cpl * strikePlugged;
         exciteT = 0.5f * ((1.0f - 0.7f * strike) + 5.0f * cpl * cvIn (kResExciteIn));
         const float g2 = gainT * gainT;
-        wetGainT = 0.5f / (1.0f + 2.0f * g2 * g2 * g2);                                  // keeps loudness roughly level as the loop closes
+        wetGainT = 1.0f / (1.0f + 2.0f * g2 * g2 * g2);                                  // keeps loudness roughly level as the loop closes
     }
 
     void smooth() noexcept
