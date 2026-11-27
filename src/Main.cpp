@@ -23,6 +23,8 @@ const juce::Colour kOrange (0xffF59E0B), kRadio (0xff38BDF8), kRoom (0xff34D399)
 juce::Colour moduleColour (int module) { return module == kModRadio ? kRadio : module == kModRoom ? kRoom : module == kModLocal ? kLocal : kOrange; }
 
 bool roomAtStart = false;   // --room (test aid)
+juce::String statusLogPath; // --log=FILE (test aid): one status line every 5 s
+bool switchTest = false;    // --switch-test (test aid): move the output to the built-in speakers and back while playing
 
 struct Station { juce::String name, url; };
 // Starting points only: public stream addresses of independent broadcasters. Nothing of theirs is bundled, and a
@@ -554,7 +556,7 @@ private:
         }
         if (ticks == 8) openAudio();            // a quarter of a second after the window appears
         if (ticks == 150 && roomAtStart) { roomButton.setToggleState (true, juce::dontSendNotification); setRoom (true); }   // --room (test aid): press ROOM after 5 s
-        if (roomAtStart && measurePath.isEmpty() && instrument.roomEnabled.load() && roomListeningSince != 0 && juce::Time::getMillisecondCounter() - roomListeningSince > 10000)
+        if (roomAtStart && measurePath.isEmpty() && statusLogPath.isEmpty() && instrument.roomEnabled.load() && roomListeningSince != 0 && juce::Time::getMillisecondCounter() - roomListeningSince > 10000)
         {
             roomAtStart = false;                                                 // ...and switch it off again 10 s after it starts listening
             roomButton.setToggleState (false, juce::dontSendNotification);
@@ -612,6 +614,23 @@ private:
         if (instrument.mapDirty.exchange (false)) { settingsDirty = true; learn.setToggleState (false, juce::dontSendNotification); }
         if (settingsDirty && now - lastSave > 2000) saveSettings();
         if (measurePath.isNotEmpty() && ticks > 8) stepMeasure();
+        if (statusLogPath.isNotEmpty() && ticks % 150 == 0)
+        {
+            auto* device = devices.getCurrentAudioDevice();
+            juce::File (statusLogPath).appendText (juce::String (ticks / 30) + " s | " + (device != nullptr ? device->getName() : juce::String ("no device")) + " | " + Radio::name (instrument.radio.state())
+                + " | buffer " + juce::String (instrument.radio.bufferedSeconds(), 1) + " s | underruns " + juce::String (instrument.radio.underruns.load()) + " | reconnects " + juce::String (instrument.radio.reconnects.load())
+                + " | callbacks " + juce::String ((juce::int64) instrument.perf.callbacks.load()) + " | late " + juce::String ((juce::int64) instrument.perf.lateCallbacks.load()) + " | max gap ms " + juce::String (instrument.perf.maxGapMs.load(), 1)
+                + " | faults " + juce::String (instrument.engine.faults.load()) + " | ROOM " + (instrument.roomEnabled.load() ? "on" : "off") + " | " + roomMessage.upToFirstOccurrenceOf (".", false, false) + "\n");
+        }
+        if (switchTest && (ticks == 450 || ticks == 900))          // at 15 s and 30 s: the same call the AUDIO dialog makes
+        {
+            auto setup = devices.getAudioDeviceSetup();
+            const auto before = setup.outputDeviceName;
+            if (ticks == 450) switchBack = before;
+            setup.outputDeviceName = ticks == 450 ? juce::String ("MacBook Pro Speakers") : switchBack;
+            const auto error = devices.setAudioDeviceSetup (setup, true);
+            if (statusLogPath.isNotEmpty()) juce::File (statusLogPath).appendText ("-- output " + before + " -> " + setup.outputDeviceName + (error.isEmpty() ? " ok" : " FAILED: " + error) + "\n");
+        }
     }
 
     void flash (const juce::String& m) { hint.setText (m, juce::dontSendNotification); flashUntil = juce::Time::getMillisecondCounter() + 3000; }
@@ -936,7 +955,7 @@ private:
     juce::uint32 wantedSince = 0, flashUntil = 0, lastSave = 0;
     bool settingsDirty = false;
     int ticks = 0;
-    juce::String roomMessage, roomDevice, outputOverride, snapshotPath;
+    juce::String roomMessage, roomDevice, outputOverride, snapshotPath, switchBack;
     std::unique_ptr<juce::DatagramSocket> roomSocket;
     int roomPid = 0;
     juce::uint32 roomStarted = 0, roomHeard = 0, roomListeningSince = 0;
@@ -975,6 +994,9 @@ public:
             }
 
         roomAtStart = commandLine.contains ("--room");
+        switchTest = commandLine.contains ("--switch-test");
+        for (const auto& arg : juce::StringArray::fromTokens (commandLine, true))
+            if (arg.startsWith ("--log=")) statusLogPath = arg.fromFirstOccurrenceOf ("=", false, false).unquoted();
         juce::String measure;
         for (const auto& arg : juce::StringArray::fromTokens (commandLine, true))
             if (arg.startsWith ("--measure=")) measure = arg.fromFirstOccurrenceOf ("=", false, false).unquoted();
