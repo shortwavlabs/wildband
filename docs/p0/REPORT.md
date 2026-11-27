@@ -4,6 +4,8 @@
 owner has been marked passed. Supporting documents: `ARCHITECTURE.md`, `TALORA-REUSE.md`,
 `RADIO-COMPATIBILITY.md`, `EVIDENCE-LOG.md`, `PLAYTEST-GUIDE.md`.
 
+**Dated follow-up (2026-11-27):** the owner has now auditioned the post-permission-fix prototype. See [OWNER-FIRST-AUDITION.md](OWNER-FIRST-AUDITION.md) for the exact feedback, revise direction and approved next steps. The earlier muted-build findings below are historical; no formal gate has been promoted. 
+
 ## The question
 
 > Can we build a live electronic instrument that feels alive, responds to its performer and surroundings, and makes
