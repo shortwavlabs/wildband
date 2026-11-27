@@ -508,7 +508,7 @@ void legacyParity()   // AT-01
                 c.mode = (Mode) (state % 3);
                 c.detune = state * 0.3f;
                 c.room = { u (rng), u (rng), u (rng) };
-                for (int i = 0; i < kNumParams; ++i) b.p[i] = c.p[i];
+                for (int i = 0; i < base::kNumParams; ++i) b.p[i] = c.p[i];
                 b.mode = (base::Mode) (int) c.mode; b.detune = c.detune; b.room = { c.room.level, c.room.activity, c.room.brightness };
                 c.plan = RoutingPlan::fromGraph (wire<Graph> (cables));                                // every depth +1
                 b.plan = base::RoutingPlan::fromGraph (wire<base::Graph> (cables));
@@ -842,6 +842,59 @@ void all()
 }
 } // namespace depth
 
+
+// =====================================================================================================================
+// Playable tuner acceptance tests: docs/p0/TUNER-ACCEPTANCE.md
+namespace tuner
+{
+/** CT-01: the off-centre TUNE sound the owner singled out must not change. Reference: the frozen P0 engine. */
+void offCentreRegression()
+{
+    currentTest = "CT-01 off-centre regression";
+    namespace base = wildband_baseline;
+    int compared = 0;
+    for (double fs : { 44100.0, 48000.0 })
+        for (float offCentre : { 0.0f, 0.25f, 0.5f, 0.75f, 1.0f })
+            for (int mode = 0; mode < 3; ++mode)
+            {
+                Controls c = defaults();
+                base::Controls b;
+                for (int i = 0; i < base::kNumParams; ++i) b.p[i] = c.p[i];
+                c.detune = b.detune = offCentre;
+                c.mode = (Mode) mode;
+                b.mode = (base::Mode) mode;
+                Graph g;                                                  // no cable in STRIKE: that destination has its own tests
+                base::Graph bg;
+                for (auto cable : { std::pair<int, int> { kRadioAudioOut, kResAudioIn }, { kRadioLevelOut, kResDampIn }, { kRadioLevelOut, kResDriftIn } }) { g.connect (cable.first, cable.second); bg.connect (cable.first, cable.second); }
+                c.plan = RoutingPlan::fromGraph (g);
+                b.plan = base::RoutingPlan::fromGraph (bg);
+                const size_t n = (size_t) fs * 2;
+                const auto radio = testSource (fs, n), hiss = noise (n, 0.05f), local = noise (n, 0.2f, 5);
+                Buf in (n);
+                for (size_t i = 0; i < n; ++i) in[i] = radio[i] + hiss[i];
+                Engine now;
+                base::Engine then;
+                now.prepare (fs);
+                then.prepare (fs);
+                Buf l1 (n), r1 (n), l2 (n), r2 (n);
+                for (size_t at = 0; at + 256 <= n; at += 256)
+                {
+                    now.process (in.data() + at, in.data() + at, local.data() + at, l1.data() + at, r1.data() + at, 256, c);
+                    then.process (in.data() + at, in.data() + at, local.data() + at, l2.data() + at, r2.data() + at, 256, b);
+                }
+                CHECK (depth::same (l1, l2) && depth::same (r1, r2));
+                if (offCentre > 0.0f && mode == 1) CHECK (rms (l1) > 1.0e-3f);   // and it is doing something
+                ++compared;
+            }
+    CHECK (compared == 30);
+}
+
+void all()
+{
+    offCentreRegression();
+}
+} // namespace tuner
+
 // ---- informational: what the control states do to level and brightness. Proxies only; nobody has listened to these.
 void metrics()
 {
@@ -904,6 +957,7 @@ int main (int argc, char** argv)
     testPatching();
     testNoAllocation();
     depth::all();
+    tuner::all();
     if (argc > 1 && std::strcmp (argv[1], "--metrics") == 0) metrics();
     std::printf ("%d checks, %d failed\n", checks, failures);
     return failures;
