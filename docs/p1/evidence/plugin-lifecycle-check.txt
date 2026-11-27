@@ -1,0 +1,35 @@
+VST3 receiver lifecycle
+  pass  RL-10 scan-like (construct, query, destroy) x3: 0 connections
+  pass  RL-11 prepare and release without rendering: 0 connections
+  pass  RL-12 4 s rendered as fast as possible (as validators do), then 2.5 s idle: 0 connections
+  pass  RL-13 offline rendering, paced in real time, 4 s: 0 connections
+  pass  RL-14 restore a saved state, then 2.5 s: 0 connections
+  pass  RL-15 real-time rendering: 1 connection(s), opened 1.87 s after rendering began; sound in the last 1.3 s (peak 0.011)
+  pass  RL-16 rendering stops: connection closed 5.37 s later (1 opened, 1 closed)
+  pass  RL-16 rendering resumes in real time: 1 new connection
+  pass  RL-17 releaseResources while active: closed 0.80 s later (0.5 s grace period; limit 1.5 s)
+  pass  RL-17 destroyed while active: closed 0.29 s later; open now: 0
+  pass  RL-20 prepareToPlay again while live (still rendering): 0 opened, 0 closed
+  pass  RL-21 release + prepare back to back while live (a host re-initialising): stream kept (0 opened, 0 closed)
+  pass  RL-22 mid-connect to a silent server: release returned in 0.0 ms, destruction in 10.5 ms
+  pass  no stream connection left open overall (4 opened, 4 closed)
+AudioUnit receiver lifecycle
+  pass  RL-10 scan-like (construct, query, destroy) x3: 0 connections
+  pass  RL-11 prepare and release without rendering: 0 connections
+  pass  RL-12 4 s rendered as fast as possible (as validators do), then 2.5 s idle: 0 connections
+  pass  RL-13 offline rendering, paced in real time, 4 s: 0 connections
+  pass  RL-14 restore a saved state, then 2.5 s: 0 connections
+  pass  RL-15 real-time rendering: 1 connection(s), opened 1.83 s after rendering began; sound in the last 1.3 s (peak 0.011)
+  pass  RL-16 rendering stops: connection closed 5.34 s later (1 opened, 1 closed)
+  pass  RL-16 rendering resumes in real time: 1 new connection
+  pass  RL-17 releaseResources while active: closed 0.82 s later (0.5 s grace period; limit 1.5 s)
+  pass  RL-17 destroyed while active: closed 0.29 s later; open now: 0
+  pass  RL-20 prepareToPlay again while live (still rendering): 0 opened, 0 closed
+  pass  RL-21 release + prepare back to back while live (a host re-initialising): stream kept (0 opened, 0 closed)
+  pass  RL-22 mid-connect to a silent server: release returned in 0.0 ms, destruction in 5.1 ms
+  pass  no stream connection left open overall (8 opened, 8 closed)
+28 checks, 0 failed
+AudioUnit validation (auval), RL-18
+  pass  RL-19 auval: AU VALIDATION SUCCEEDED
+  pass  RL-18 auval opened 0 connections to the counting server
+  pass  RL-18 no remote TCP connection seen from the auval process (netstat, sampled every 0.2 s)

@@ -3,7 +3,10 @@
 # Copyright (C) 2026 Stephane P. Pericat
 """Local stand-in for awkward radio servers, for the G1 protocol tests (docs/p0/RADIO-COMPATIBILITY.md).
 
-    python3 -I tools/stream_test_server.py clip.mp3 [port [clipB.mp3 clipC.mp3]]
+    python3 -I tools/stream_test_server.py clip.mp3 [port [clipB.mp3 clipC.mp3]] [--log FILE]
+
+With --log, every connection is recorded as it opens and closes ("open <time> <path>" / "close <time> <path>"),
+so a test can count exactly how many connections a client made and whether it closed them.
 
 Serves the clip in a loop at real-time pace on 127.0.0.1. Paths:
   /live      plain Icecast-style stream            /redirect  302 -> /live
@@ -17,6 +20,17 @@ Serves the clip in a loop at real-time pace on 127.0.0.1. Paths:
   /silent    accepts the connection and never answers
 """
 import socket, sys, threading, time
+
+logfile = None
+if '--log' in sys.argv:
+    i = sys.argv.index('--log')
+    logfile = sys.argv[i + 1]
+    del sys.argv[i:i + 2]
+loglock = threading.Lock()
+def log(event, path):
+    if logfile is None: return
+    with loglock, open(logfile, 'a') as f:
+        f.write('%s %.3f %s\n' % (event, time.time(), path))
 
 clip = open(sys.argv[1], 'rb').read()
 port = int(sys.argv[2]) if len(sys.argv) > 2 else 8765
@@ -43,9 +57,11 @@ def stream(conn, seconds=None, stall=False, meta=False, clip=clip):
         if ahead > 0: time.sleep(ahead)
 
 def handle(conn):
+    path = '?'
     try:
         request = conn.recv(4096).decode('latin1')
         path = request.split(' ')[1] if ' ' in request else '/'
+        log('open', path)
         base = f'http://127.0.0.1:{port}'
         def head(status='HTTP/1.0 200 OK', ctype='audio/mpeg', extra=''):
             conn.sendall(f'{status}\r\nContent-Type: {ctype}\r\nicy-name: Local test\r\n{extra}\r\n'.encode())
@@ -68,6 +84,7 @@ def handle(conn):
     except OSError:
         pass
     finally:
+        log('close', path)
         conn.close()
 
 server = socket.socket()

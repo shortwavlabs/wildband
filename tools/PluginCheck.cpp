@@ -6,7 +6,11 @@
 // Logic, Live or any other host behaves.
 //
 //   wildband_plugin_check vst3=/path/WILDBAND.vst3        (the AU is looked up as aumu/Wldb/SwLb in the system)
+//   wildband_plugin_check vst3=... lifecycle=/path/server.log
+//        receiver lifecycle checks RL-10..RL-17 (docs/p1/PLUGIN-RECEIVER-LIFECYCLE.md) against tools/stream_test_server.py
+//        started with --log, with WILDBAND_TEST_STATIONS pointing at it. Run through tools/run_plugin_lifecycle_check.sh.
 #include <juce_audio_utils/juce_audio_utils.h>
+#include <AudioToolbox/AudioToolbox.h>
 
 #include <cmath>
 #include <cstdio>
@@ -113,15 +117,182 @@ void exercise (juce::AudioPluginFormatManager& fm, const juce::String& format, c
     check (state.getSize() < 2048, "state as the host stores it is " + juce::String ((int) state.getSize()) + " bytes (settings only; no audio could fit)");
     p->releaseResources();
 }
+// ---- receiver lifecycle, counted at the server ----------------------------------------------------------------------
+juce::File serverLog;
+struct Conn { int opens = 0, closes = 0; double firstOpen = -1, lastClose = -1; };
+Conn connections (double since)      // connections the server logged since `since` (epoch seconds)
+{
+    Conn c;
+    for (const auto& line : juce::StringArray::fromLines (serverLog.loadFileAsString()))
+    {
+        const auto w = juce::StringArray::fromTokens (line, " ", "");
+        if (w.size() < 3) continue;
+        const double t = w[1].getDoubleValue();
+        if (t < since) continue;
+        if (w[0] == "open") { ++c.opens; if (c.firstOpen < 0) c.firstOpen = t; }
+        if (w[0] == "close") { ++c.closes; c.lastClose = t; }
+    }
+    return c;
+}
+double epoch() { return (double) juce::Time::currentTimeMillis() / 1000.0; }
+void pump (double seconds) { const double until = juce::Time::getMillisecondCounterHiRes() + seconds * 1000.0; while (juce::Time::getMillisecondCounterHiRes() < until) juce::MessageManager::getInstance()->runDispatchLoopUntil (5); }
+
+/** Renders `seconds` of audio; `paced` = in real time (pumping the message loop meanwhile), else as fast as possible. */
+float render (juce::AudioPluginInstance& p, double seconds, bool paced, double fs = 48000.0)
+{
+    juce::AudioBuffer<float> buffer (2, 512);
+    juce::MidiBuffer midi;
+    float peak = 0;
+    const double t0 = juce::Time::getMillisecondCounterHiRes();
+    const int blocks = (int) (seconds * fs / 512);
+    for (int b = 0; b < blocks; ++b)
+    {
+        buffer.clear();
+        p.processBlock (buffer, midi);
+        if (b > blocks * 2 / 3) peak = std::max (peak, buffer.getMagnitude (0, 512));
+        if (paced) { const double due = t0 + 1000.0 * (b + 1) * 512 / fs; while (juce::Time::getMillisecondCounterHiRes() < due) juce::MessageManager::getInstance()->runDispatchLoopUntil (1); }
+        else if (b % 64 == 0) juce::MessageManager::getInstance()->runDispatchLoopUntil (1);
+    }
+    return peak;
+}
+
+void lifecycle (juce::AudioPluginFormatManager& fm, const juce::String& format, const juce::String& id)
+{
+    std::printf ("%s receiver lifecycle\n", format.toRawUTF8());
+    double t = epoch();
+    for (int k = 0; k < 3; ++k) { auto p = load (fm, format, id, 48000.0, 512); if (p != nullptr) { (void) p->getParameters().size(); (void) p->getName(); } pump (0.4); }
+    pump (1.0);
+    check (connections (t).opens == 0, "RL-10 scan-like (construct, query, destroy) x3: " + juce::String (connections (t).opens) + " connections");
+
+    t = epoch();
+    { auto p = load (fm, format, id, 48000.0, 512); p->prepareToPlay (48000.0, 512); pump (2.0); p->releaseResources(); pump (0.5); }
+    check (connections (t).opens == 0, "RL-11 prepare and release without rendering: " + juce::String (connections (t).opens) + " connections");
+
+    t = epoch();
+    { auto p = load (fm, format, id, 48000.0, 512); p->prepareToPlay (48000.0, 512); render (*p, 4.0, false); pump (2.5); p->releaseResources(); }
+    check (connections (t).opens == 0, "RL-12 4 s rendered as fast as possible (as validators do), then 2.5 s idle: " + juce::String (connections (t).opens) + " connections");
+
+    t = epoch();
+    {
+        auto p = load (fm, format, id, 48000.0, 512);
+        p->setNonRealtime (true);              // reaches a VST3 as its offline process mode...
+        if (format == "AudioUnit")             // ...but JUCE's AU hosting does not forward it, so set the AU's own property as Logic does for a bounce
+            if (auto* client = p->getAudioUnitClient()) if (auto au = client->getAudioUnitHandle()) { const UInt32 one = 1; AudioUnitSetProperty (au, kAudioUnitProperty_OfflineRender, kAudioUnitScope_Global, 0, &one, sizeof (one)); }
+        p->prepareToPlay (48000.0, 512);
+        render (*p, 4.0, true);
+        p->releaseResources();
+    }
+    check (connections (t).opens == 0, "RL-13 offline rendering, paced in real time, 4 s: " + juce::String (connections (t).opens) + " connections");
+
+    juce::MemoryBlock saved;
+    { auto p = load (fm, format, id, 48000.0, 512); p->getParameters()[0]->setValue (0.6f); p->getStateInformation (saved); }
+    t = epoch();
+    { auto p = load (fm, format, id, 48000.0, 512); p->setStateInformation (saved.getData(), (int) saved.getSize()); pump (2.5); }
+    check (connections (t).opens == 0, "RL-14 restore a saved state, then 2.5 s: " + juce::String (connections (t).opens) + " connections");
+
+    // RL-15..17 with one instance
+    auto p = load (fm, format, id, 48000.0, 512);
+    p->prepareToPlay (48000.0, 512);
+    t = epoch();
+    const float peak = render (*p, 4.0, true);
+    auto c = connections (t);
+    check (c.opens == 1 && c.firstOpen - t >= 1.5 && c.firstOpen - t <= 2.5 && peak > 0.0f,
+           "RL-15 real-time rendering: " + juce::String (c.opens) + " connection(s), opened " + juce::String (c.firstOpen - t, 2) + " s after rendering began; sound in the last 1.3 s (peak " + juce::String (peak, 3) + ")");
+    const double stopped = epoch();
+    pump (7.0);
+    c = connections (t);
+    check (c.closes == c.opens && c.lastClose - stopped <= 6.0, "RL-16 rendering stops: connection closed " + juce::String (c.lastClose - stopped, 2) + " s later (" + juce::String (c.opens) + " opened, " + juce::String (c.closes) + " closed)");
+    double t2 = epoch();
+    render (*p, 3.0, true);
+    check (connections (t2).opens == 1, "RL-16 rendering resumes in real time: " + juce::String (connections (t2).opens) + " new connection");
+    const double released = epoch();
+    p->releaseResources();
+    pump (1.5);
+    c = connections (t2);
+    // limit raised from 1.0 to 1.5 s when the 0.5 s release grace period was added (RL-21): grace + one timer tick +
+    // the time the test server takes to notice a closed socket (it only finds out on its next paced write)
+    check (c.closes == c.opens && c.lastClose - released <= 1.5, "RL-17 releaseResources while active: closed " + juce::String (c.lastClose - released, 2) + " s later (0.5 s grace period; limit 1.5 s)");
+    p->prepareToPlay (48000.0, 512);
+    t2 = epoch();
+    render (*p, 3.0, true);
+    const double destroyed = epoch();
+    p.reset();
+    pump (1.5);
+    c = connections (t2);
+    check (c.opens == 1 && c.closes == 1 && c.lastClose - destroyed <= 1.0, "RL-17 destroyed while active: closed " + juce::String (c.lastClose - destroyed, 2) + " s later; open now: " + juce::String (c.opens - c.closes));
+    // RL-20 / RL-21: a host re-preparing a live plugin
+    {
+        auto q = load (fm, format, id, 48000.0, 512);
+        q->prepareToPlay (48000.0, 512);
+        render (*q, 2.5, true);
+        double t3 = epoch();
+        q->prepareToPlay (48000.0, 512);                        // same rate, e.g. a buffer-size change
+        render (*q, 2.5, true);
+        auto c3 = connections (t3);
+        check (c3.opens == 0 && c3.closes == 0, "RL-20 prepareToPlay again while live (still rendering): " + juce::String (c3.opens) + " opened, " + juce::String (c3.closes) + " closed");
+        t3 = epoch();
+        q->releaseResources();
+        q->prepareToPlay (48000.0, 512);
+        render (*q, 3.0, true);
+        c3 = connections (t3);
+        check (c3.closes == 0 && c3.opens == 0, "RL-21 release + prepare back to back while live (a host re-initialising): stream kept (" + juce::String (c3.opens) + " opened, " + juce::String (c3.closes) + " closed)");
+        q.reset();
+        pump (1.0);
+    }
+
+    // RL-22: teardown while a connection is still being made (station 3 points at a server that never answers)
+    {
+        auto q = load (fm, format, id, 48000.0, 512);
+        for (auto* prm : q->getParameters()) if (prm->getName (16) == "TUNE") prm->setValue ((2.0f + 0.5f) / 6.0f);
+        q->prepareToPlay (48000.0, 512);
+        double t3 = epoch();
+        render (*q, 2.5, true);
+        const bool connecting = connections (t3).opens == 1;
+        double t0 = juce::Time::getMillisecondCounterHiRes();
+        q->releaseResources();
+        const double releaseMs = juce::Time::getMillisecondCounterHiRes() - t0;
+        q->prepareToPlay (48000.0, 512);
+        render (*q, 2.5, true);
+        t0 = juce::Time::getMillisecondCounterHiRes();
+        q.reset();
+        const double destroyMs = juce::Time::getMillisecondCounterHiRes() - t0;
+        check (connecting && releaseMs < 100.0 && destroyMs < 1000.0, "RL-22 mid-connect to a silent server: release returned in " + juce::String (releaseMs, 1) + " ms, destruction in " + juce::String (destroyMs, 1) + " ms");
+    }
+
+    const auto all = connections (0);
+    // (connections to the silent server are never logged as closed: its handler is asleep, not reading)
+    (void) all;
+    int answered = 0, answeredClosed = 0;
+    for (const auto& line : juce::StringArray::fromLines (serverLog.loadFileAsString()))
+    {
+        if (line.contains ("/silent")) continue;
+        if (line.startsWith ("open ")) ++answered;
+        if (line.startsWith ("close ")) ++answeredClosed;
+    }
+    check (answered == answeredClosed, "no stream connection left open overall (" + juce::String (answered) + " opened, " + juce::String (answeredClosed) + " closed)");
+}
 } // namespace
 
 int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI init;
-    juce::String vst3;
-    for (int i = 1; i < argc; ++i) if (juce::String (argv[i]).startsWith ("vst3=")) vst3 = juce::String (argv[i]).fromFirstOccurrenceOf ("=", false, false);
+    juce::String vst3, log;
+    for (int i = 1; i < argc; ++i)
+    {
+        const juce::String a (argv[i]);
+        if (a.startsWith ("vst3=")) vst3 = a.fromFirstOccurrenceOf ("=", false, false);
+        if (a.startsWith ("lifecycle=")) log = a.fromFirstOccurrenceOf ("=", false, false);
+    }
     juce::AudioPluginFormatManager fm;
     juce::addDefaultFormatsToManager (fm);
+    if (log.isNotEmpty())
+    {
+        serverLog = juce::File (log);
+        if (vst3.isNotEmpty()) lifecycle (fm, "VST3", vst3);
+        lifecycle (fm, "AudioUnit", "AudioUnit:Synths/aumu,Wldb,SwLb");
+        std::printf ("%d checks, %d failed\n", checks, failures);
+        return failures;
+    }
     if (vst3.isNotEmpty()) exercise (fm, "VST3", vst3);
     exercise (fm, "AudioUnit", "AudioUnit:Synths/aumu,Wldb,SwLb");
     std::printf ("%d checks, %d failed\n", checks, failures);

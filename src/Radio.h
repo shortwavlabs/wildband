@@ -20,6 +20,9 @@ public:
 
     /** Any non-audio thread. Switches to `url` (empty = stop); whatever is playing fades out at once. */
     void tune (const juce::String& url);
+    /** Like tune(), but not a station request by the player: no tuner static, no request count. For resuming a station
+        after the plugin was suspended or re-prepared, which is housekeeping, not a musical retune. */
+    void resume (const juce::String& url);
     /** Sample rate read() must deliver. A change restarts the stream; the audio thread is never involved. */
     void setOutputRate (double fs);
 
@@ -48,6 +51,7 @@ private:
     enum class End { Superseded, Retry, Fatal };
 
     void run() override;
+    void request (const juce::String& url, bool deliberate);
     End runSession (const juce::String& url, double fs, int myGen, int depth);
     bool push (const float* interleaved, int frames, int channels, int myGen);
     void setDetail (const juce::String&);

@@ -132,7 +132,10 @@ Radio::~Radio()
     stopThread (4000);
 }
 
-void Radio::tune (const juce::String& newUrl)
+void Radio::tune (const juce::String& newUrl) { request (newUrl, true); }
+void Radio::resume (const juce::String& newUrl) { request (newUrl, false); }
+
+void Radio::request (const juce::String& newUrl, bool deliberate)
 {
     {
         const juce::ScopedLock sl (lock);
@@ -142,8 +145,12 @@ void Radio::tune (const juce::String& newUrl)
         const auto now = juce::Time::getMillisecondCounter();
         if (now - lastTuneMs.load() < (juce::uint32) kSettleMs) burst = true;   // a quick succession of requests: only the last one connects
         lastTuneMs = now;
-        tuneCount.fetch_add (1);
-        wantedGen = ++gen;                                   // only this, never setOutputRate, makes a restart a "retune"
+        if (deliberate)
+        {
+            tuneCount.fetch_add (1);
+            wantedGen = ++gen;                               // only a deliberate request, never setOutputRate or resume, makes a restart a "retune"
+        }
+        else ++gen;
         phase = url.isEmpty() ? Phase::Idle : Phase::Connecting;
         if (activeStream != nullptr) activeStream->cancel();
     }
@@ -296,7 +303,8 @@ void Radio::run()
 
 Radio::End Radio::runSession (const juce::String& address, double fs, int myGen, int depth)
 {
-    juce::WebInputStream stream (juce::URL (address), false);
+    auto streamOwner = std::make_unique<juce::WebInputStream> (juce::URL (address), false);
+    auto& stream = *streamOwner;
     stream.withExtraHeaders ("Icy-MetaData: 0\r\nUser-Agent: WILDBAND/0.1 (P0 prototype)");   // no in-band metadata: nothing to strip
     stream.withConnectionTimeout (8000);
     stream.withNumRedirectsToFollow (5);
@@ -340,7 +348,15 @@ Radio::End Radio::runSession (const juce::String& address, double fs, int myGen,
         {
             line = line.trim();
             if (line.startsWithIgnoreCase ("File")) line = line.fromFirstOccurrenceOf ("=", false, false).trim();   // .pls
-            if (line.startsWithIgnoreCase ("http") && depth < 2) return runSession (line, fs, myGen, depth + 1);
+            if (line.startsWithIgnoreCase ("http") && depth < 2)
+            {
+                // Close the playlist request before opening the stream it names: one receiver holds one connection.
+                // (Following it from inside this frame used to keep the playlist's connection open for the whole
+                // session - measured: two sockets per playlist station.)
+                { const juce::ScopedLock sl (lock); activeStream = nullptr; }
+                streamOwner.reset();
+                return runSession (line, fs, myGen, depth + 1);
+            }
         }
         setDetail ("playlist has no stream address");
         return End::Fatal;

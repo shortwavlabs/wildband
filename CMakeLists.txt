@@ -120,7 +120,7 @@ if(WILDBAND_PLUGIN)
     target_sources(wildband_plugin_check PRIVATE tools/PluginCheck.cpp)
     target_compile_definitions(wildband_plugin_check PRIVATE JUCE_PLUGINHOST_AU=1 JUCE_PLUGINHOST_VST3=1 JUCE_MODAL_LOOPS_PERMITTED=1 JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0
         JUCE_USE_FLAC=0 JUCE_USE_OGGVORBIS=0 JUCE_USE_OPUS=0 JUCE_USE_MP3AUDIOFORMAT=0 JUCE_USE_WEBP=0)
-    target_link_libraries(wildband_plugin_check PRIVATE juce::juce_audio_utils juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+    target_link_libraries(wildband_plugin_check PRIVATE juce::juce_audio_utils "-framework AudioToolbox" juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 endif()
 
 # ---- G1 evidence tool: the real receiver, no audio device
