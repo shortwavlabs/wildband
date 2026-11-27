@@ -36,6 +36,10 @@ Start with a *small* network: streaming audio excitation -> resonant/nonlinear v
 
 Do not overcommit to spectral, granular or complex physically modeled DSP until listening tests support it. Conduct an A/B against a generic filter-and-delay chain.
 
+## Follow-up patch utilities (research only)
+
+After P0 owner audition, explore an auxiliary mixer with deliberately bounded feedback paths and a configurable audio envelope follower/gate. Later consider an environmental SENSE scale/offset/polarity/smoothing utility and a small patchable LFO. Reuse TALORA's typed audio/CV and real-time-safe graph patterns only after inspecting actual implementation and porting costs. A field pickup connected via an audio interface is a potential future true environmental *audio* source; motors/solenoids require external hardware. See [`FIELD-KIT-INSPIRED-UTILITIES.md`](FIELD-KIT-INSPIRED-UTILITIES.md). This proposal does not modify the current P0 gate or imply these features work.
+
 ## Real-time and reliability design
 
 - No network calls, locks with uncertain latency, decoding, file access or GUI in processBlock.
