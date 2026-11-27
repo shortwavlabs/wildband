@@ -35,3 +35,45 @@ Create the *desire to touch* that the user associates with Teenage Engineering, 
 ## Art acceptance
 
 A user should be able to point to the five central gestures and correctly predict their effect. The faceplate must be readable and genuinely interactive; model/render quality alone does not pass this gate.
+
+## Illuminated performance display — future UI research
+
+**Status:** proposed design direction, not an approved or required P0 feature. **Reference:** Teenage Engineering EP-133 K.O. II's playful segmented/icon display behavior, *not* its actual icons, screen graphics, typography, panel layout or trade dress. Build a distinct Shortwav Labs display language.
+
+### Product intent
+
+WILDBAND should have a small, charming **live signal display** that makes the instrument feel like a tactile electronic object. It is a source of secondary performance feedback and personality, not a replacement for ears or physical MIDI controls. A performer should still be able to improvise **without looking at the computer**.
+
+### Visual concept
+
+- A compact smoked-glass or dark translucent panel with individually illuminated, legible iconography, compact segmented-style numerals, and sparse motion. Prefer characterful low-information presentation over a high-density desktop dashboard.
+- WILDBAND-specific pictograms for radio, room, weather, patching, control/gesture, oscillation, and feedback; distinguish from the EP-133's actual artwork and arrangement.
+- Use Shortwav Labs orange **#F59E0B** as a recognizably branded accent, paired with a small number of supporting high-contrast signal colors. Icons need non-color cues.
+- Blender supplies enclosure, bezel, glass/reflections and optionally inert illumination masks. **JUCE renders changing icons, numbers, meters, animations, real source state and interaction/accessibility.** The audio callback must never draw UI or dispatch UI work directly.
+
+### Candidate states and animations (behavioral ideas, not UI contracts)
+
+| Display mode | Signal-driven content |
+| --- | --- |
+| RADIO | Station/source indicator, buffering/connected/error status, activity animation derived from real input energy |
+| ROOM | Microphone permission/status and an expressive activity glyph responding to valid local audio features |
+| PATCH | Compact view of active typed routes; actual audio/CV activity, not fabricated cable flow |
+| KORUPT (future) | PLL lock/tracking confidence and glitch activity when Korupt is implemented; no fake lock telemetry |
+| ENVIRONMENT (future) | Available/stale status for weather and other optional sensors; no implication that Wi-Fi/BLE are raw EM measurements |
+| FEEDBACK | Readable feedback intensity and safety intervention state; do not glamorize or obscure unsafe levels |
+| MIDI | Brief learn/assignment feedback and controller event indication when events are actually received |
+
+A tiny playful **responsive character / creature** is an optional explorative treatment for ROOM or overall signal activity, provided it has a clear mapping to real inputs and never interferes with critical status visibility. Avoid a mandatory mascot or distracting screen-wide animations.
+
+### Interaction requirements and implementation gates
+
+1. **Prioritize musical affordances:** gestures and MIDI mappings work with the display closed, dimmed or ignored. Display modes must not block actual parameter access.
+2. **Semantically honest status:** live, buffered, silent, permission denied, source unavailable and stale environmental data must be distinguishable; do not present decorative animation as measured data.
+3. **Low overhead:** cap redraw frequency, avoid graphics allocations/locks in the real-time callback, interpolate meter snapshots on the UI thread, and validate CPU/GPU usage while DSP runs.
+4. **Accessibility:** readable text at Retina and 100–200% scale, contrast and reduced-motion alternative; do not rely solely on color or tiny pictograms for operational information.
+5. **Prototype first:** validate one JUCE-rendered functional display panel using real stream envelope and MIDI/patch status in the interaction prototype. Only after owner acceptance consider Blender treatment, expanded icon set, and animated personalities.
+6. **Distinctiveness:** evoke playful segmented electronic-instrument displays without copying identifiable EP-133 screen composition, icons, specific typography or product silhouettes.
+
+### Explicit scope boundary
+
+This is **design research and eventual UI roadmap work**, not authorization to interrupt the ongoing P0 radio/DSP/MIDI/patching implementation, add a miniature game, or spend time on full Blender rendering before owner playability acceptance.
