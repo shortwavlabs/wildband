@@ -955,7 +955,8 @@ private:
             }
         }
         instrument.params[kLevel] = juce::jmin (instrument.params[kLevel].load(), paramDefaults[kLevel]);   // never start loud
-        if (p.containsKey ("cables")) patch.graph = loadPatch (p.getValue ("cables").toStdString());   // "from|to|depth"; P0's "from|to" loads at +100 %
+        // "cables" stays in P0's format so both builds can share one settings file; depths live under their own key
+        if (p.containsKey ("cables")) patch.graph = loadPatch (p.getValue ("cables").toStdString(), p.getValue ("cableDepths").toStdString());
         wanted = tuned = dial (instrument.params[kTune].load(), kNumStations).station;
         instrument.radio.tune (stations[(size_t) tuned].url);
         urlEditor.setText (stations[(size_t) tuned].url, false);
@@ -974,6 +975,7 @@ private:
             p.setValue (juce::String ("cc") + paramNames[i], cc);
         }
         p.setValue ("cables", juce::String (savePatch (patch.graph)));
+        p.setValue ("cableDepths", juce::String (savePatch (patch.graph, true)));
         if (auto xml = devices.createStateXml()) p.setValue ("audio", xml.get());
         p.saveIfNeeded();
         settingsDirty = false;

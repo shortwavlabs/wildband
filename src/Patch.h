@@ -225,16 +225,20 @@ private:
     int back = 0, front = 2;      // owned by the writer / by the reader
 };
 
-// ---- persistence: "from|to|depth;from|to|depth;..." using port ids. The depth is optional, so patches saved before
-// depths existed ("from|to") load at +1. Anything invalid is dropped or corrected; the result is always a valid Graph.
-inline std::string savePatch (const Graph& g)
+// ---- persistence. Two strings, on purpose:
+//   cables: "from|to;from|to;..."            exactly what P0 wrote, so the P0 build still reads a patch saved here
+//   depths: "from|to|depth;from|to|depth;..." read only by builds that know about depths
+// (P0 takes everything after the first '|' as the input's id, so a depth inside `cables` would make it drop every
+// cable and then save the empty patch.) A patch with no `depths` loads at +1. Anything invalid is dropped or
+// corrected; the result is always a valid Graph.
+inline std::string savePatch (const Graph& g, bool withDepths = false)
 {
     std::string text;
     for (int i = 0; i < g.size(); ++i)
     {
-        char depth[32];
-        std::snprintf (depth, sizeof (depth), "%.4f", (double) g[i].depth);
-        text += std::string (i ? ";" : "") + ports[g[i].from].id + "|" + ports[g[i].to].id + "|" + depth;
+        char depth[32] = "";
+        if (withDepths) std::snprintf (depth, sizeof (depth), "|%.4f", (double) g[i].depth);
+        text += std::string (i ? ";" : "") + ports[g[i].from].id + "|" + ports[g[i].to].id + depth;
     }
     return text;
 }
@@ -259,6 +263,15 @@ inline Graph loadPatch (const std::string& text)
         }
         g.connect (findPort (from.c_str()), findPort (to.c_str()), depth);                  // every rule of connect() applies
     }
+    return g;
+}
+
+/** Loads `cables` (topology) and then applies `depths` to the cables that exist in it. */
+inline Graph loadPatch (const std::string& cables, const std::string& depths)
+{
+    Graph g = loadPatch (cables);
+    const Graph wanted = loadPatch (depths);
+    for (int i = 0; i < wanted.size(); ++i) g.setDepth (wanted[i].from, wanted[i].to, wanted[i].depth);   // ignored unless that cable is there
     return g;
 }
 

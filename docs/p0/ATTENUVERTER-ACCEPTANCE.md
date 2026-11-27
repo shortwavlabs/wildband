@@ -73,14 +73,14 @@ by accident); undo.
 
 ## Results (added after implementation, 2026-11-27)
 
-Build: branch `p0/attenuverter`. `ctest --test-dir build`: `wildband_tests` **659 checks, 0 failed** (the 442
+Build: branch `p0/attenuverter`. `ctest --test-dir build`: `wildband_tests` **670 checks, 0 failed** (the 442
 baseline checks plus these), also with `-O3 -ffp-contract=off`; `wildband_talora_parity` 120 000 edits, 0
 disagreements.
 
 | ID | Result | Notes |
 |---|---|---|
 | AT-01 | **Pass** | 36 runs (3 rates × 3 patches × 4 control states), sample-identical to the frozen engine |
-| AT-02 | **Pass** | Also seen for real: the owner's saved P0 patch (no depths) loaded on this build with every cable at +100 % |
+| AT-02 | **Pass** | Also seen for real: the owner's saved P0 patch (no depths) loaded on this build with every cable at +100 %. Topology is still saved in P0's format (`cables`), depths under a separate key (`cableDepths`), so the P0 build reads patches saved by this one; a test replays P0's own parsing rule on what this build writes |
 | AT-03 | **Pass** | 18 cable/source combinations |
 | AT-04 | **Pass** | PITCH lands within 2 cents of ±100 cents; the other five are ordered −1 < 0 < +1 on their observable |
 | AT-05 | **Pass** | |
@@ -89,7 +89,7 @@ disagreements.
 | AT-08 | **Pass** | Garbage plans (NaN, ±infinity, ±1e30, random sources) in the hostile-input runs; mixed signed depths in the block-size test |
 | AT-09 | **Pass** | Every depth flipped −1 ↔ +1 every 25 ms for 2 s: largest step below 0.03 |
 | AT-10 | **Pass** | 0 allocations with plans published and read in the loop |
-| AT-11 | **Pass** | 400 000 plans published against a concurrent reader: 0 torn plans; the reader ends on the last plan |
+| AT-11 | **Pass** | 400 000 plans published against a concurrent reader: 0 torn plans (each plan's sources and depths are derived from one value, with a different pairing per input, and the check is shown to reject a mixture); the reader ends on the last plan |
 | AT-12 | **Pass** | 22 malformed strings |
 | AT-13 | **Pass** | |
 | AT-14 | **Pass** | |

@@ -545,7 +545,33 @@ void persistence()   // AT-02, AT-12
     g.setDepth (kRoomLevelOut, kResFeedbackIn, -0.5f);
     g.setDepth (kRadioLevelOut, kResDampIn, 0.25f);
     g.setDepth (kRadioLevelOut, kResDriftIn, 0.0f);
-    const Graph back = loadPatch (savePatch (g));                                                 // round trip keeps depths
+    const Graph back = loadPatch (savePatch (g), savePatch (g, true));                            // round trip keeps depths
+    CHECK (loadPatch (savePatch (g)).depthInto (kResFeedbackIn) == 1.0f);                         // topology alone: +1
+    CHECK (loadPatch (savePatch (g, true)).depthInto (kResFeedbackIn) == -0.5f);                  // the three-field form is also readable on its own
+    {
+        Graph other = Graph::defaultPatch();                                                      // depths for cables that are not there are ignored
+        other.disconnect (kRoomLevelOut, kResFeedbackIn);
+        const Graph partial = loadPatch (savePatch (other), savePatch (g, true));
+        CHECK (partial.size() == 6 && partial.cableInto (kResFeedbackIn) == -1 && partial.depthInto (kResDampIn) == 0.25f);
+    }
+    {
+        // The P0 build must still read what this build saves under "cables" (both builds share one settings file).
+        // This is P0's own parsing rule, from its Main.cpp: split on ';', then on the FIRST '|', and look both ids up.
+        namespace base = wildband_baseline;
+        base::Graph old2;
+        const std::string cables = savePatch (g);
+        for (size_t at = 0; at <= cables.size();)
+        {
+            const size_t end = std::min (cables.find (';', at), cables.size());
+            const std::string cable = cables.substr (at, end - at);
+            at = end + 1;
+            const size_t bar = cable.find ('|');
+            if (bar == std::string::npos) continue;
+            old2.connect (base::findPort (cable.substr (0, bar).c_str()), base::findPort (cable.substr (bar + 1).c_str()));
+        }
+        CHECK (old2.size() == g.size());
+        for (int in = kFirstInput; in < kNumPorts; ++in) CHECK (old2.cableInto (in) == g.cableInto (in));
+    }
     CHECK (back.size() == 7 && back.depthInto (kResFeedbackIn) == -0.5f && back.depthInto (kResDampIn) == 0.25f && back.depthInto (kResDriftIn) == 0.0f && back.depthInto (kResPitchIn) == 1.0f);
 
     currentTest = "AT-12 malformed state";
@@ -738,20 +764,37 @@ void coherentHandOff()   // AT-11
 {
     currentTest = "AT-11 coherent hand-off";
     PlanMailbox mail;
-    auto make = [] (int k) { RoutingPlan p; for (int i = 0; i < kNumInputs; ++i) { p.source[i] = (int8_t) (k % 100); p.depth[i] = (float) (k % 2001 - 1000) / 1000.0f; } return p; };
+    // every field of plan k is derived from the one value k % 200, and the source/depth pairing differs per input, so
+    // a plan assembled from two different publications cannot satisfy the check below
+    auto make = [] (int k)
+    {
+        RoutingPlan p;
+        const int v = k % 200;
+        for (int i = 0; i < kNumInputs; ++i) { p.source[i] = (int8_t) ((v + i) % 100); p.depth[i] = (float) (v + 3 * i) / 250.0f - 0.5f; }
+        return p;
+    };
+    auto whole = [] (const RoutingPlan& p)
+    {
+        const int low = p.source[0];                                         // v % 100: v is low or low + 100
+        for (int v : { low, low + 100 })
+        {
+            bool ok = true;
+            for (int i = 0; i < kNumInputs; ++i) ok = ok && p.source[i] == (int8_t) ((v + i) % 100) && p.depth[i] == (float) (v + 3 * i) / 250.0f - 0.5f;
+            if (ok) return true;
+        }
+        return false;
+    };
     const int total = 400000;
     std::atomic<bool> done { false };
-    std::atomic<int> torn { 0 }, backwards { 0 };
+    std::atomic<int> torn { 0 };
     std::atomic<long long> reads { 0 };
     mail.publish (make (0));
     std::thread reader ([&]
     {
-        int lastDepthStep = -1;
-        (void) lastDepthStep;
         while (! done.load())
         {
             const RoutingPlan p = mail.read();
-            for (int i = 1; i < kNumInputs; ++i) if (p.source[i] != p.source[0] || p.depth[i] != p.depth[0]) torn.fetch_add (1);   // a mixture of two plans
+            if (! whole (p)) torn.fetch_add (1);                              // sources of one plan with depths of another, or a half-written slot
             reads.fetch_add (1);
         }
     });
@@ -759,10 +802,10 @@ void coherentHandOff()   // AT-11
     done = true;
     reader.join();
     CHECK (torn.load() == 0);
-    CHECK (backwards.load() == 0);
     CHECK (reads.load() > 1000);
-    const RoutingPlan last = mail.read(), want = make (total);                       // the reader always ends on the newest plan
-    CHECK (last.source[0] == want.source[0] && last.depth[0] == want.depth[0]);
+    CHECK (! whole ([&] { auto p = make (5); p.depth[3] = make (6).depth[3]; return p; }()));   // the check itself rejects a mixture
+    const RoutingPlan last = mail.read(), want = make (total);                // the reader always ends on the newest plan
+    CHECK (std::memcmp (last.source, want.source, sizeof (want.source)) == 0 && std::memcmp (last.depth, want.depth, sizeof (want.depth)) == 0);
 }
 
 void panic()   // AT-15
