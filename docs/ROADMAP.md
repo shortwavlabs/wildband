@@ -1,6 +1,6 @@
 # WILDBAND — Product Roadmap
 
-**Version 1.0 | 2026-11-27 | Owner-agreed planning direction.** Candidate implementations, DSP choices, design and release gates still require evidence. Includes Rings as a priority resonator experiment, ATMOSPHERE and macOS AUv3 feasibility.
+**Version 1.1 | 2026-11-27 | Owner-agreed planning direction.** Candidate implementations, DSP choices, design and release gates still require evidence. Includes Rings as a priority resonator experiment, ATMOSPHERE and macOS AUv3 feasibility.
 
 **Play the world. The world is your oscillator.**
 
@@ -8,7 +8,7 @@
 
 The [Instrument Design & Experience Manifesto](INSTRUMENT-DESIGN-MANIFESTO.md) governs the roadmap. WILDBAND is one cohesive semi-modular instrument, not an empty rack or collection of effects. WORLD (live broadcasts and surroundings), SOUND (distinctive voice), DISCOVERY (meaningful patching), PLAY (tactile musical agency). The favorite guitar test: does the musician return simply to play?
 
-Compelling normalled sound first; patching opens deeper possibilities. Real external conditions must have audible, useful influence. Save the instrument, not the performance: no built-in recording, capture/sampling workflow, timeline or audio export. No mandatory peripheral, cloud account or location permission.
+Compelling normalled sound first; patching opens deeper possibilities. Real external conditions must have audible, useful influence. Save the instrument, not the performance: no full-performance recording, sample library, timeline or audio export. The sole deliberate capture exception is LOOP: a tiny explicitly captured, RAM-only fragment for live manipulation, never saved with a patch. No mandatory peripheral, cloud account or location permission.
 
 ## Schedule and contest requirements
 
@@ -57,9 +57,12 @@ Compare modal resonator, sympathetic strings and inharmonic/nonlinear string mod
 | P1-A Korupt | CMOS/PLL tracking, subharmonics, nonlinear corruption | Rack-free equivalents, rights review, aliasing/lock/cost checks; [issue #2](https://github.com/shortwavlabs/wildband/issues/2) |
 | P1-B AFTERIMAGE | Rolling granular delay, TRACE-to-CLOUD DISSOLVE | No IMPRINT/freeze/capture; overwrite temporary DSP history; broadband/filter-first; previous realtime gates unresolved; [research](AFTERIMAGE-DSP-REUSE.md) |
 | P1-C Wyrd | Feedback delay/filter, atmosphere, strength and TOUCH | Select complementary primitives, bound feedback/memory, review Vult; [research](WYRD-REUSE-RESEARCH.md) |
+| P1-L LOOP (Tapestry) | Short volatile radio fragments, chop, reverse and granular microsound | High priority; proposed 8 s cap, fixed capacity, no saved reels; [technical research](TAPESTRY-LOOPER-RESEARCH.md) |
 | P1-D Drift | Organic random CV motion | CV only, not external randomness; Vult audit; resolve DRIFT naming clash; [research](FIELD-KIT-INSPIRED-UTILITIES.md) |
 
 Common listening harness, lawful comparable speech/music/percussion/noise/silence/static, matched levels, actual WORLD route enabled/disabled. Separate numerical, realtime, safety and owner preference evidence. No audio-thread allocation, blocking or network. Test worst-case callbacks, sample rates/buffers, stereo/mono, feedback, aliasing, resets and PANIC. No unnecessary FFT path. Rights issues block affected ports, not independent experiments.
+
+P1-L is a parallel playable source fed by radio; audition a small Tapestry-derived loop before committing to separate granular engines. Compare with continuous AFTERIMAGE DISSOLVE and share qualified primitives if useful. Preserve live radio and completed loop across retunes; choose final controls before Blender geometry.
 
 P1-E possible normalled path: RADIO/TUNER → excitation/resonance/corruption → dissolution → space → stereo output. WORLD/DRIFT/TOUCH/MIDI modulate selected stages. Not a locked topology. Each algorithm earns its place; do not ship all four or expose branded modules just because they exist.
 
@@ -74,6 +77,7 @@ P1-E possible normalled path: RADIO/TUNER → excitation/resonance/corruption �
 | CV mixing, auxiliary mixer, bounded feedback routing | High |
 | Adjustable envelope follower/gate | High |
 | Undo/recovery and clear valid socket affordances | High |
+| LOOP audio routes, signed CV and bounded slice/retrigger events | High |
 | General clock/trigger routing | Stretch |
 
 [TALORA-inspired/Field Kit research](FIELD-KIT-INSPIRED-UTILITIES.md). Independent depths multiply source before destination-specific mapping; smooth, clamp, unavailable source neutral. Extend one-input policy only with tested mixer/fan-in. Explicit delayed bounded feedback cycles, reliable PANIC, coherent nonblocking snapshots. Compact selected-cable DEPTH rather than bank of knobs.
@@ -108,13 +112,13 @@ Ambient light/BLE RSSI/Wi-Fi research/post-contest; external induction/contact p
 
 One cohesive enclosure, vintage experimental radio meets playful modern electronics. Original Shortwav Labs #F59E0B accent, tactile tuning scale/buttons, readable labels. Explore receiver, field instrument and laboratory device directions. References vintage radio, EP-133 K.O. II, Strega and TALORA as principles, not copies.
 
-Candidate sections TUNER, WORLD, RESONANCE/CORRUPTION, DISSOLVE, SPACE, TOUCH, PATCH FIELD. Final set follows sonic evidence. Immediate gratification, progressive discovery, visible signal flow, productive accidents, easy recovery. Signature original compact illuminated segmented/icon display: real tune/lock/connection, room/phone/weather activity, qualified DSP telemetry, MIDI, feedback. Optional responsive character only if meaningful; no fabricated telemetry or safety obstruction.
+Candidate sections TUNER, WORLD, RESONANCE/CORRUPTION, DISSOLVE, SPACE, TOUCH, LOOP, PATCH FIELD. Final set follows sonic evidence. Immediate gratification, progressive discovery, visible signal flow, productive accidents, easy recovery. Signature original compact illuminated segmented/icon display: real tune/lock/connection, room/phone/weather activity, qualified DSP telemetry, MIDI, feedback. Optional responsive character only if meaningful; no fabricated telemetry or safety obstruction.
 
 Blender static enclosure, textures, filmstrips, glass, illumination/shadows; JUCE dynamic labels, controls, cables, hit testing, animation, MIDI, accessibility/scaling. Functional prototype first, no final geometry before stable control set. No realtime 3D. Test laptop sizing, Retina, keyboard, contrast/non-color cues, reduced motion and CPU.
 
 ## P5 — Performance and refinement (Jan 14)
 
-Essential MIDI learn, navigation, saved maps, actual hardware testing (Launch Control XL, BeatStep, Keystep). High: TOUCH, stable MIDI mapping of connection depth. Stretch: footswitch, MIDI clock. Mouse equally usable. Persist only stations, controls, routes/depth, MIDI and generic source settings, not recordings, sensor history or delay contents. Restore gracefully, no unsolicited permission or network surprise.
+Essential MIDI learn, navigation, saved maps, actual hardware testing (Launch Control XL, BeatStep, Keystep). High: TOUCH, stable MIDI mapping of connection depth. Stretch: footswitch, MIDI clock. Mouse equally usable. Persist only stations, controls, routes/depth, MIDI and generic source settings, not captured LOOP audio, recordings, sensor history or delay contents. Restore LOOP empty; configuration only. Restore gracefully, no unsolicited permission or network surprise.
 
 Two owner 15-minute sessions, matched ENGINE/DRY/REFERENCE, MIDI and ROOM evidence, unfamiliar musicians if feasible. First minute compelling sound, understandable tuner/patch, meaningful WORLD causality, contrasting states, recovery, voluntary return. Separate subjective and technical verdicts.
 
@@ -122,7 +126,7 @@ Two owner 15-minute sessions, matched ENGINE/DRY/REFERENCE, MIDI and ROOM eviden
 
 ## P6 — Field Guide (Jan 21)
 
-Illustrated creative experiments rather than dry parameter reference: quick start, tuner, patch/depth, WORLD, MIDI, safety/recovery. Recipes only if supported: Between Stations, Ghost Conversation, Magnetic Cloud, Room Creature, Weathering, Broken Transmission, Self-Exciting Radio, Two Stations Arguing. No prerecorded outcomes.
+Illustrated creative experiments rather than dry parameter reference: quick start, tuner, patch/depth, WORLD, MIDI, safety/recovery. Recipes only if supported: Between Stations, Ghost Conversation, Magnetic Cloud, Room Creature, Weathering, Broken Transmission, Self-Exciting Radio, Two Stations Arguing, Caught Transmission (short loop against retuned radio). No prerecorded outcomes.
 
 ## P7 — Release qualification (Jan 21–24)
 
@@ -145,7 +149,7 @@ Fennesz-inspired intimate performance, not feature checklist. Show qualifying pl
 
 Essential: distinctive voice, live tuner/static/detune, semi-modular audio/CV, independent depth, ROOM, MIDI, polished original UI/display, safe feedback/recovery, configuration persistence, signed/notarized contest-eligible plugin, source and demo.
 
-High: Rings early audition, selected Korupt/AFTERIMAGE/Wyrd/Drift candidates (not guaranteed inclusions), auxiliary mixer/feedback, follower/gate, SENSE, environmental hop, iPhone bridge, ATMOSPHERE, AUv3 feasibility and additional qualified macOS format.
+High: tiny Tapestry-derived LOOP with volatile capture/chop/mangle, Rings early audition, selected Korupt/AFTERIMAGE/Wyrd/Drift candidates (not guaranteed inclusions), auxiliary mixer/feedback, follower/gate, SENSE, environmental hop, iPhone bridge, ATMOSPHERE, AUv3 feasibility and additional qualified macOS format.
 
 Stretch: second radio, custom phone companion, advanced spectral processing, general clock/trigger, VST3 if time. Post-contest: Windows, iPadOS/mobile AUv3, broader sensing, external SDR/pickups and hardware.
 
