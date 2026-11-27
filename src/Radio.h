@@ -69,12 +69,13 @@ private:
     static constexpr int kSettleMs = 150;            // requests closer together than this are coalesced into the last one
     std::atomic<bool> burst { false };
     std::atomic<int> tuneCount { 0 };
-    std::atomic<bool> stationWanted { false };       // a station the player asked for has not played yet (set by tune, cleared once it plays)
+    std::atomic<int> wantedGen { -1 };               // generation of the latest station request (set by tune only)
     std::atomic<juce::uint32> lastTuneMs { 0 };
 
     // audio thread state
     int readerGen = -1;
     bool playing = false, playedThisGen = false;
+    int playedGen = -1;                              // newest generation that has actually played
     float gain = 0.0f;
 };
 
