@@ -208,6 +208,7 @@ struct Controls
     Mode mode = Mode::Engine;
     float detune = 0.0f;   // Dial::offCentre
     float gap = 0.0f;      // Radio::tuneGap: 0 = the station is playing, 1 = the receiver is fetching the one just asked for
+    int request = 0;       // Radio::request: changes with every station request, so each one gets its own static
     EnvFrame room;         // EnvBus::read
     RoutingPlan plan = RoutingPlan::fromGraph (Graph::defaultPatch());
 };
@@ -237,7 +238,8 @@ public:
         reset();
     }
 
-    /** PANIC: clears all audio state, and keeps the tuner static silent until the current retune has finished. */
+    /** PANIC: clears all audio state, and keeps the tuner static silent until the current retune has finished or the
+        player asks for another station. */
     void panic() noexcept
     {
         reset();
@@ -404,8 +406,10 @@ private:
 
         // ---- tuner static: only while the receiver reports a gap, and never for longer than 8 s (full for 4 s, then
         // fading), so a station that never arrives does not hiss for ever. PANIC mutes it until the gap has closed.
+        // Each new request starts the clock again (and lifts a PANIC mute): hopping onward from a station that never
+        // arrived must not find the static already spent.
         const float gapIn = clamp01 (c.gap);
-        if (gapIn < 0.01f) { gapSeconds = 0.0f; staticMuted = false; }
+        if (gapIn < 0.01f || c.request != lastRequest) { gapSeconds = 0.0f; staticMuted = false; lastRequest = c.request; }
         else gapSeconds += (float) kControlInterval / (float) fs;
         staticT = staticMuted ? 0.0f : gapIn * pt[kStatic] * clamp01 (2.0f - gapSeconds * 0.25f);
 
@@ -503,6 +507,7 @@ private:
     float srcW[2] = {}, srcT[2] = {}, strikePlugged = 0, aMod = 0;
     StaticSource tunerStatic;
     float staticGain = 0, staticT = 0, gapSeconds = 0;
+    int lastRequest = 0;
     bool staticMuted = false;
     float aParam = 0, aFreq = 0, aMode = 0, aDc = 0, aFast = 0, aFastRel = 0, aSlow = 0;
 };

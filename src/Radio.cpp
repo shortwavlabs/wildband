@@ -134,7 +134,7 @@ void Radio::tune (const juce::String& newUrl)
 {
     {
         const juce::ScopedLock sl (lock);
-        if (newUrl == url) return;
+        if (newUrl == url && phase.load() != Phase::Failed) return;      // asking again for a station that FAILED tries it again
         url = newUrl;
         detailText.clear();
         const auto now = juce::Time::getMillisecondCounter();

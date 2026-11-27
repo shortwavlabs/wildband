@@ -121,6 +121,7 @@ public:
         c.mode = (Mode) mode.load (std::memory_order_relaxed);
         c.detune = dial (c.p[kTune], kNumStations).offCentre;
         c.gap = radio.tuneGap.load (std::memory_order_relaxed);   // written by radio.read in the previous block
+        c.request = radio.request();
         c.plan = plans.read();                              // whole plan or the previous whole plan, never a mixture
         const auto nowMs = (int64_t) juce::Time::getMillisecondCounter();
 

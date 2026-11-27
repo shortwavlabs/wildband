@@ -964,6 +964,25 @@ void timeBound()   // CT-13
     CHECK (rms (part (mono (e, Buf (48000, 0.0f), c), 0.2, 1.0)) > 1.0e-3f);        // ...and the next retune has static again
 }
 
+void hoppingOnward()   // CT-16
+{
+    currentTest = "CT-16 a new request gets fresh static";
+    auto c = defaults();
+    c.p[kStatic] = 1.0f; c.mode = Mode::Dry; c.gap = 1.0f; c.request = 7;
+    Engine e;
+    e.prepare (48000.0);
+    const auto first = mono (e, Buf (48000 * 9, 0.0f), c);                          // a station that never arrives: 9 s with the gap open
+    const float full = rms (part (first, 1.0, 3.0));
+    CHECK (full > 1.0e-3f && peak (part (first, 8.2, 9.0)) == 0.0f);                // its static has run out
+    c.request = 8;                                                                  // NEXT: the gap never closed in between
+    const auto next = mono (e, Buf (48000 * 3, 0.0f), c);
+    CHECK (std::abs (rms (part (next, 1.0, 3.0)) / full - 1.0f) < 0.25f);           // full static for the new request
+    e.panic();
+    CHECK (peak (mono (e, Buf (48000, 0.0f), c)) == 0.0f);                          // PANIC still silences this request...
+    c.request = 9;
+    CHECK (rms (part (mono (e, Buf (48000, 0.0f), c), 0.2, 1.0)) > 1.0e-3f);        // ...and the next one sounds
+}
+
 void throughTheEngine()   // CT-14
 {
     currentTest = "CT-14 static goes through the engine";
@@ -1052,6 +1071,7 @@ void all()
     staticOffIsTheOldBehaviour();
     levelAndShape();
     timeBound();
+    hoppingOnward();
     throughTheEngine();
     tails();
     panicDuringStatic();

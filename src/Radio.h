@@ -34,6 +34,8 @@ public:
         spontaneous dropout of a station that was playing, and when idle or failed. The tuner static follows this,
         so it lasts exactly as long as the real wait. Written by read(). */
     std::atomic<float> tuneGap { 0.0f };
+    /** Changes with every request (tune or sample-rate change). The engine restarts the static's time limit on it. */
+    int request() const noexcept { return gen.load (std::memory_order_relaxed); }
 
     static const char* name (State) noexcept;
 

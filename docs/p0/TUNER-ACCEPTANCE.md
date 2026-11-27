@@ -46,6 +46,8 @@ Receiver-level (real time, `wildband_tuner_check` against `tools/stream_test_ser
 | CT-07 | Rapid switching | 50 requests in 2 s across three stations carrying different tones: only the last station's tone is heard afterwards; connection attempts ≤ 20 |
 | CT-08 | Stale audio | In CT-07, no analysis window after the last request (plus the 20 ms fade) contains another station's tone |
 | CT-15 | Spontaneous dropout | A playing station whose server closes: the gap stays closed (no static) |
+| CT-16 | A new request gets fresh static (engine-level; added after review) | With the gap open for 9 s and the static spent, a new request has full static again; PANIC silences only the current request |
+| CT-17 | Getting away from a bad station (added after review) | From a server that never answers, a refused port and a 404, the next station is LIVE within 1.5 s, with static during the wait; re-selecting a FAILED station makes one new attempt |
 
 Not automatable (owner): whether the wait has become a gesture; whether static and off-centre detune feel like two
 related things or a muddle; the right default level; preset jumps and NEXT/PREVIOUS from hardware.
@@ -56,7 +58,7 @@ related things or a muddle; the right default level; preset jumps and NEXT/PREVI
 
 **Technical evidence only. All runs were muted; nobody has heard the static or pressed a button by hand.**
 
-Engine-level, `ctest` → `wildband_tests`: **743 checks, 0 failed** (670 from the attenuverter branch plus these).
+Engine-level, `ctest` → `wildband_tests`: **747 checks, 0 failed** (670 from the attenuverter branch plus these).
 
 | ID | Result | Notes |
 |---|---|---|
@@ -68,8 +70,9 @@ Engine-level, `ctest` → `wildband_tests`: **743 checks, 0 failed** (670 from t
 | CT-12 | **Pass** | −23.1 dBFS RMS at the default setting (48 kHz); peak ≤ 0.9; zero mean; the same loudness at 44.1 and 96 kHz; deterministic |
 | CT-13 | **Pass** | |
 | CT-14 | **Pass** | Static rings the resonators, moves RADIO LEVEL, is cut by pulling the audio cable, and is changed by off-centre detune |
+| CT-16 | **Pass** | Found in review: the 8 s limit used to run across requests, so hopping on from a station that never arrived found the static already spent. Each request now restarts it |
 
-Receiver-level, `tools/run_tuner_check.sh` → `wildband_tuner_check`: **17 checks, 0 failed**. Full output:
+Receiver-level, `tools/run_tuner_check.sh` → `wildband_tuner_check`: **24 checks, 0 failed**. Full output:
 [`evidence/tuner-check.txt`](evidence/tuner-check.txt).
 
 | ID | Result | Measured |
@@ -82,6 +85,7 @@ Receiver-level, `tools/run_tuner_check.sh` → `wildband_tuner_check`: **17 chec
 | CT-08 | **Pass** | 0 blocks carrying another station's tone after the last request |
 | CT-10 | **Pass** | During a real 3 s wait: static rings the engine (peak 0.66), PANIC gives exact silence until the station arrives, then it plays |
 | CT-15 | **Pass** | A playing station whose server closes every 3 s: 2 reconnects, gap stayed closed, no static |
+| CT-17 | **Pass** | After one second stuck on a silent server, a refused port or a 404, the next station was LIVE in 0.03–0.04 s (local server). Re-selecting a FAILED station makes exactly one new attempt; before this fix it did nothing |
 
 One failure on the way, fixed: the first coalescing attempt let 34 of 51 requests connect (a wake-up left over from
 the previous request). The receiver now waits until requests have been quiet for 150 ms; a single request does not

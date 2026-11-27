@@ -46,6 +46,7 @@ struct Rig
     {
         radio.read (l.data(), r.data(), block);
         c.gap = radio.tuneGap.load();                        // as in the app: the value read() left
+        c.request = radio.request();
         engine.process (l.data(), r.data(), zeros.data(), ol.data(), orr.data(), block, c);
         Frame f { now(), radio.state(), radio.tuneGap.load(), engine.meterStatic.load(), 0.0f, 0.0f, -1 };
         double sum = 0, power[3] = {};
@@ -144,6 +145,34 @@ int main (int argc, char** argv)
         rig.run (19.0);
         CHECK (rig.maxStatic (start + 8.5, rig.now()) < 0.001f, "server never answers: static ended by 8.5 s and stayed silent for 10 s of retries (max after: %.5f); state %s, %d attempts",
                (double) rig.maxStatic (start + 8.5, rig.now()), Radio::name (rig.radio.state()), rig.radio.connects.load());
+    }
+
+    std::printf ("CT-17 getting away from a bad station\n");
+    {
+        const std::pair<const char*, juce::String> bad[] = { { "a server that never answers", base + "/silent" }, { "a refused port", deadPort }, { "a 404", base + "/missing" } };
+        for (const auto& b : bad)
+        {
+            Rig rig;
+            rig.run (0.2);
+            rig.radio.tune (b.second);
+            rig.run (1.0);                                                    // one second stuck on it, then move on
+            const double start = rig.now();
+            rig.radio.tune (base + "/a");
+            const double live = rig.untilLive (10.0);
+            rig.run (0.3);
+            int right = 0;
+            for (auto& f : rig.log) if (f.t > start && f.tone == 0) ++right;
+            CHECK (live > 0 && live < 1.5 && right > 0, "from %s: LIVE on the next station after %.2f s", b.first, live);
+            CHECK (rig.maxStatic (start + 0.05, start + juce::jmax (0.06, live)) > 0.5f || live < 0.1, "  with static during that wait (max %.2f)", (double) rig.maxStatic (start + 0.05, start + juce::jmax (0.06, live)));
+        }
+        Rig rig;                                                              // asking again for a station that FAILED tries again
+        rig.radio.tune (base + "/missing");
+        rig.run (1.0);
+        const int before = rig.radio.connects.load();
+        const bool failed = rig.radio.state() == Radio::State::Failed;
+        rig.radio.tune (base + "/missing");
+        rig.run (1.0);
+        CHECK (failed && rig.radio.connects.load() == before + 1 && rig.radio.state() == Radio::State::Failed, "re-selecting a FAILED station makes one new attempt (%d -> %d), and reports FAILED again", before, rig.radio.connects.load());
     }
 
     std::printf ("CT-07 / CT-08 rapid switching and stale audio\n");
