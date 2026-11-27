@@ -1595,6 +1595,39 @@ void all()
         }
     }
 
+    currentTest = "RG-07b knob jumps with a Rings voice are click-free";
+    {
+        Buf x (48000);
+        for (size_t i = 0; i < x.size(); ++i) x[i] = 0.3f * std::sin (2.0f * kPi * 100.0f * (float) i / 48000.0f);
+        for (int model = 0; model < 3; ++model)
+        {
+            auto maxStep = [&] (Controls a, Controls b)
+            {
+                Engine e3;
+                e3.prepare (fs);
+                Buf firstHalf (x.begin(), x.begin() + 24000), secondHalf (x.begin() + 24000, x.end());
+                auto y1 = run (e3, firstHalf, a, 64);
+                const auto y2 = run (e3, secondHalf, b, 64);
+                y1.insert (y1.end(), y2.begin(), y2.end());
+                float m = 0;
+                for (size_t i = 2; i < y1.size(); ++i) m = std::max (m, std::abs (y1[i] - y1[i - 2]));
+                return m;
+            };
+            auto base = ringsControls (model);
+            base.p[kTone] = 0.2f; base.p[kPitch] = 0.1f;
+            const float steady = maxStep (base, base);
+            for (int p : { (int) kPitch, (int) kShape, (int) kTone, (int) kFeedback, (int) kDrift, (int) kMix, (int) kLevel })
+                for (float to : { 0.0f, 1.0f })
+                {
+                    auto b = base;
+                    b.p[p] = to;
+                    const float step2 = maxStep (base, b);
+                    CHECK (step2 < steady + 0.03f);
+                    if (step2 >= steady + 0.03f) std::printf ("    model %d, %s -> %.0f: step %.3f (steady %.3f)\n", model, paramNames[p], (double) to, (double) step2, (double) steady);
+                }
+        }
+    }
+
     currentTest = "RG-07 switching to and from Rings is click-free";
     {
         Engine e;
