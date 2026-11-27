@@ -18,7 +18,7 @@ FetchContent_Declare(JUCE
 FetchContent_MakeAvailable(JUCE)
 
 set(WILDBAND_DEFS
-    JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_DISPLAY_SPLASH_SCREEN=0
+    JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0
     # stream decoding is done by macOS (AudioToolbox); JUCE's own codecs are not compiled in
     JUCE_USE_FLAC=0 JUCE_USE_OGGVORBIS=0 JUCE_USE_OPUS=0 JUCE_USE_MP3AUDIOFORMAT=0 JUCE_USE_WEBP=0)
 
@@ -28,17 +28,17 @@ juce_add_gui_app(WILDBAND
     COMPANY_NAME "Shortwav Labs"
     BUNDLE_ID com.shortwavlabs.wildband
     MICROPHONE_PERMISSION_ENABLED TRUE
-    MICROPHONE_PERMISSION_TEXT "WILDBAND listens to the room to shape its sound. The microphone is analysed on this Mac only; it is never played back, stored or sent anywhere."
+    MICROPHONE_PERMISSION_TEXT "WILDBAND listens to the room to shape its sound. The microphone is analysed on this Mac only. It is never played back, stored or sent anywhere."
     # many stations still serve plain http://
     PLIST_TO_MERGE "<plist><dict><key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoads</key><true/></dict></dict></plist>")
-target_sources(WILDBAND PRIVATE src/Main.cpp src/Radio.cpp)
+target_sources(WILDBAND PRIVATE src/Main.cpp src/Radio.cpp src/MicPermission.mm)
 target_compile_definitions(WILDBAND PRIVATE ${WILDBAND_DEFS} JUCE_APPLICATION_NAME_STRING="WILDBAND" JUCE_APPLICATION_VERSION_STRING="${PROJECT_VERSION}")
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/assets/knob/knob.png)
     juce_add_binary_data(wildband_assets SOURCES assets/knob/knob.png)
     target_link_libraries(WILDBAND PRIVATE wildband_assets)
     target_compile_definitions(WILDBAND PRIVATE WILDBAND_HAS_KNOB=1)
 endif()
-target_link_libraries(WILDBAND PRIVATE juce::juce_audio_utils "-framework AudioToolbox"
+target_link_libraries(WILDBAND PRIVATE juce::juce_audio_utils "-framework AudioToolbox" "-framework AVFoundation"
     juce::juce_recommended_config_flags juce::juce_recommended_lto_flags juce::juce_recommended_warning_flags)
 # ad-hoc signature over the finished bundle, so macOS can remember the microphone decision. Not a Developer ID.
 add_custom_command(TARGET WILDBAND POST_BUILD VERBATIM COMMAND codesign --force --deep --sign - "$<TARGET_BUNDLE_DIR:WILDBAND>")
