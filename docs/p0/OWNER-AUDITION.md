@@ -6,9 +6,10 @@ Everything is in **one build**. Monitors down first; nobody has heard any of thi
 open /Users/shortwavlabs/Workspace/shortwavlabs/wildband-integration/build/WILDBAND_artefacts/Release/WILDBAND.app
 ```
 
-This binary is built from the top of the stack: branch `p1/rings`, which contains the integration candidate (#7),
-the STRIKE responses (#8), the tuner restart fix (#9), the voice lab (#10), the licence (#11) and the Rings
-experiment. The bundle now carries its licence and third-party notices in `Contents/Resources`.
+This binary is built from the top of the stack: branch `p1/plugin-proof` (#15), which contains the integration
+candidate (#7), the STRIKE responses (#8), the tuner restart fix (#9), the voice lab (#10), the licence (#11), the
+Rings experiment (#13) and the shared instrument core. The standalone behaves as before; the bundle carries its
+licence and third-party notices in `Contents/Resources`.
 
 It keeps its own settings (`WILDBAND-integration.settings`, started as a copy of your existing setup) and never
 writes the file the four older builds share. **LAB choices are remembered between launches**; while either is not at
@@ -95,13 +96,29 @@ Sort by name: `music__dry`, `music__reference`, `music__resonator`, `music__diss
 drums, a chord sequence, tuner static, silence, a sine); the "world" in these files is a scripted stand-in, not a
 room. **Treat the Korupt files with suspicion**: the harness may be driving it wrongly (see `VOICE-RESEARCH.md`).
 
+## 6. The plugin, in Logic and Live (first time in a real host)
+
+The AU is installed for your user (`~/Library/Audio/Plug-Ins/Components/WILDBAND.component`, ad-hoc signed, passes
+`auval`). The VST3 is not installed; copy it if you want to try it in Live:
+
+```bash
+cp -R /Users/shortwavlabs/Workspace/shortwavlabs/wildband-integration/build/WILDBAND_Plugin_artefacts/Release/VST3/WILDBAND.vst3 ~/Library/Audio/Plug-Ins/VST3/
+```
+
+It is an instrument (Logic: *Software Instrument → AU Instruments → Shortwav Labs → WILDBAND*). There is no WILDBAND
+panel yet — the host shows ten sliders. Try: it makes sound within a few seconds (static, then a station);
+automate TUNE across stations; play notes (PITCH); save, close and reopen the project; two instances; bypass; a
+bounce. Note anything odd — especially whether **plain `http://` stations** (WFMU, BBC) play inside the host.
+To remove it: delete `WILDBAND.component` from that folder.
+
 ## What I need back
 
 1. STRIKE response: A, B or C — or "none, because…".
 2. Static: keep, change its sound, or drop? Default level?
 3. Dissolve: worth pursuing? alone or into the resonators?
 4. From the renders: which candidates deserve a proper port?
-5. "Apply it" for AGPL-3.0-only, and the copyright holder's name for the headers.
+5. What happened in Logic / Live (section 6).
+6. Confirmation that the five Tapestry LOOP files (`tapestry-core/buffer/splice/grain/dsp.h`) are solely yours, so the LOOP port can start.
 
 ## What was measured on this build (muted; technical only)
 
