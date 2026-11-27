@@ -23,7 +23,7 @@ The defining experience is the audible interaction between:
 
 The outside world should be musically consequential, not decorative telemetry. The musician determines how strongly and in what ways it influences the sound. Internal random modulation complements actual environmental observations, not replaces them. Simulated tuner static, for example, is honest synthetic sound whose timing follows real connection and buffering conditions.
 
-The same patch played in different surroundings or at a different time should invite a different performance, while retaining a recognizable musical character. Save the instrument's configuration, not the performance. No capture, sample archive, timeline or built-in recording/export workflow.
+The same patch played in different surroundings or at a different time should invite a different performance, while retaining a recognizable musical character. Save the instrument's configuration, not the performance. No sample archive, timeline or full-performance recording/export workflow. Owner-approved exception (2026-11-27): [LOOP](TAPESTRY-LOOPER-RESEARCH.md) may capture a very short radio fragment into volatile memory for immediate chopping, looping and manipulation. It is a playing gesture, not an archive; captured audio is never serialized or restored. Historical P0 remains capture-free.
 
 ## 3. Borrow the engineering, create our instrument
 
