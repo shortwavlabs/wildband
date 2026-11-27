@@ -10,6 +10,10 @@ Everything here was produced on one machine on 2026-11-27. "Not done" means not 
 | Network | Not recorded |
 | Listening | **None.** The author of this prototype cannot hear. Every run was muted (LEVEL forced to 0) |
 
+## Owner first audition (2026-11-27, after muted development runs)
+
+See [OWNER-FIRST-AUDITION.md](OWNER-FIRST-AUDITION.md) for the owner's six responses, verbatim notes and approved follow-up. Positive first impression; resonator expressiveness and per-cable modulation depth need work. Session protocol details remain unspecified. All earlier technical measurements and gate verdicts below are preserved as historical evidence, not a claim that nobody has since listened.
+
 ## Gate status
 
 | Gate | Technical evidence | Owner-dependent part | Status |
