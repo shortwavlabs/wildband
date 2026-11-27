@@ -126,3 +126,94 @@ Dissolve (first eligible experiment):
 Live: the LAB menu offers Resonator (default) / Dissolve / Dissolve → Resonator.
 
 Out of scope for this branch: porting Korupt, Wyrd or Drift; any panel change; choosing a voice.
+
+---
+
+## Results (added after implementation, 2026-11-27)
+
+**Numbers and files only. Nobody has listened to any of these renders or to the live LAB voices. No candidate is
+preferred.**
+
+### Harness
+
+| ID | Result | Notes |
+|---|---|---|
+| VL-01 | **Pass** | `wildband_voice_lab` builds with no external path; five in-repo voices × six fixtures × WORLD on/off |
+| VL-02 | **Pass with one exception** | All renders finite. Matched to −23 dBFS RMS (the −20 dBFS first planned left too little headroom for crest factors near 20 dB). One file, `percussion__dissolve`, would still have clipped and was turned down 1.5 dB; the report lists it. A render below −70 dBFS is left alone and reported as silent (the first version amplified Wyrd's −93 dBFS idle noise up to the matched level) |
+| VL-03 | **Pass** | Full table: [`evidence/voice-lab-report.md`](evidence/voice-lab-report.md) |
+| VL-04 | **Pass** | With `-DTAPESTRY_DIR` and `-DRACK_SDK_DIR`, Wyrd's time/filter delay, Drift and Korupt are compiled from `vcv-tapestry` in place, Korupt against the Rack SDK headers |
+| VL-05 | **Pass** | No code from another repository and no audio file is in this repository. The renders (102 WAV files, about 190 MB) are in the build tree |
+
+To make the listening files:
+
+```bash
+cmake -S . -B build -DTAPESTRY_DIR=$HOME/Workspace/shortwavlabs/vcv-tapestry -DRACK_SDK_DIR=$HOME/Workspace/rack-plugin-toolchain/Rack-SDK-mac-arm64
+```
+
+```bash
+cmake --build build --target wildband_voice_lab && build/wildband_voice_lab build/voice-lab
+```
+
+Files are named `fixture__voice__world-on.wav` / `…world-off.wav`, so sorting by name puts the voices for one
+fixture side by side.
+
+### Dissolve (D2, new WILDBAND code)
+
+`wildband_tests`: **802 checks, 0 failed** (788 before, plus DV-01 … DV-06).
+
+| ID | Result |
+|---|---|
+| DV-01 … DV-04, DV-06 | **Pass** |
+| DV-05 | **Pass.** With the resonator selected nothing changed (all earlier checks, including sample-identical parity with the frozen engine); switching between the three LAB voices every 50 ms adds no step |
+
+Measured: about 14 ns per sample on top of the engine (one thread, synthetic); 1.0 MB of history at 48 kHz.
+**Not measured: CoreAudio callback timing with a LAB voice selected.**
+
+### What the numbers show (and what they cannot)
+
+Per-sample cost, one thread, 48 kHz: whole engine with the resonator about 50–64 ns; with Dissolve about 63–72 ns;
+Korupt as written 38–49 ns; Wyrd's time/filter delay as written 65–85 ns; Drift's core 31 ns (it runs at audio
+rate; a control source would run at control rate, about 16 times cheaper). Memory: Wyrd as written 4.4 MB, Dissolve
+1.0 MB, resonator 0.1 MB, Korupt and Drift negligible.
+
+"WORLD on vs off" (how much the scripted room track changed the output, relative to the output): resonator −4 to
++6 dB, Dissolve −4 to −6 dB, Dissolve → Resonator 0 to +9 dB, Wyrd −1 to −8 dB, Korupt −6 to −9 dB. All respond;
+these figures say that a difference exists, not that it is musical.
+
+Findings worth acting on:
+
+- **Korupt's study is incomplete.** Driven the way its own module drives it, in this harness it reported *lock ≈ 0
+  on every fixture, including a pure 220 Hz sine*, "tracking" 1.0 even on silence, and an output near full scale
+  (−0.5 to −2.8 dBFS RMS, crest 3–5 dB) **including on silence**. A PLL that never locks on a sine is more likely a
+  fault in how the harness drives it than a property of Korupt; its own tests (which need a Rack SDK build) were not
+  run. Do not draw conclusions about Korupt from these files. One real point stands regardless: the first WORLD
+  route tried (room activity → RATE) changed nothing in its output.
+- **Wyrd's delay is not silent on silence** (−105 dBFS idle); harmless, but a WILDBAND version should be exactly
+  silent after PANIC. As written it allocates 4.4 MB whatever the sample rate.
+- **Dissolve's cloud has a high crest factor** (up to 19–21 dB on percussion). Loud grains will meet the engine's
+  safety clip; the grain normalisation needs listening and probably revising.
+- **Drift against a plain sine** as a control source: within 0–2 dB of each other in how much they change the
+  resonator's output on these fixtures. Whether Drift *sounds* more alive is exactly what a difference figure cannot
+  say.
+
+### Live
+
+**LAB → Voice experiment**: Resonator (default) / Dissolve / Dissolve → Resonator, switchable while a station
+plays, on the same knobs and cables (PITCH = time, SHAPE = echo…cloud, DRIFT = spray, FEEDBACK = regeneration,
+TONE = damping). The status line says when a LAB voice is on. The selection is remembered per settings profile.
+
+### Status of each candidate
+
+| | Studied | Renders for the owner | Live in the LAB menu | Integration |
+|---|---|---|---|---|
+| D0 Resonator | — | yes | yes (default) | in the instrument |
+| D1 Korupt | compiled in place; **behaviour not established** | yes, but see above | no | blocked: Rack SDK types to replace; licence not yet applied |
+| D2 Dissolve | new code | yes | yes | experimental; no blocker |
+| D3 Wyrd time/filter | compiled in place | yes | no | allowed once the licence is applied; needs resizing and exact silence |
+| D3 Wyrd reverb, strength, TOUCH | read only | no | no | reverb overlaps Dissolve and the delay; strength overlaps the engine's saturators; TOUCH is already the patch bay |
+| D4 Drift | compiled in place; reproduced from source | yes (as modulation) | no | allowed once the licence is applied; needs a control-rate version and another name |
+
+### Remaining uncertainties
+
+Musical: everything. Technical: Korupt's behaviour; CoreAudio cost of the LAB voices; whether Dissolve needs pitch
+to belong to this instrument; whether one "space" (Dissolve's cloud, Wyrd's delay, Wyrd's reverb) is enough.

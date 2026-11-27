@@ -69,6 +69,22 @@ target_sources(wildband_tuner_check PRIVATE tools/TunerCheck.cpp src/Radio.cpp)
 target_compile_definitions(wildband_tuner_check PRIVATE ${WILDBAND_DEFS})
 target_link_libraries(wildband_tuner_check PRIVATE juce::juce_core "-framework AudioToolbox" juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 
+# ---- voice lab (docs/p0/VOICE-RESEARCH.md): level-matched renders of every candidate voice. No JUCE.
+# Candidates that live in other repositories are compiled from there, in place; nothing of theirs is in this tree.
+#   -DTAPESTRY_DIR=/path/to/vcv-tapestry    adds Wyrd's time/filter delay and Drift
+#   -DRACK_SDK_DIR=/path/to/Rack-SDK        (with TAPESTRY_DIR) adds Korupt, which uses Rack SDK headers
+add_executable(wildband_voice_lab research/VoiceLab.cpp)
+target_compile_options(wildband_voice_lab PRIVATE -O2)
+if(TAPESTRY_DIR)
+    target_sources(wildband_voice_lab PRIVATE ${TAPESTRY_DIR}/src/dsp/generated/wyrd_core.cpp ${TAPESTRY_DIR}/src/dsp/generated/drift_core.cpp ${TAPESTRY_DIR}/src/dsp/generated/vultin.cpp)
+    target_include_directories(wildband_voice_lab PRIVATE ${TAPESTRY_DIR}/src ${TAPESTRY_DIR}/src/dsp)
+    target_compile_definitions(wildband_voice_lab PRIVATE WILDBAND_LAB_TAPESTRY=1)
+    if(RACK_SDK_DIR)
+        target_include_directories(wildband_voice_lab SYSTEM PRIVATE ${RACK_SDK_DIR}/include ${RACK_SDK_DIR}/dep/include)
+        target_compile_definitions(wildband_voice_lab PRIVATE WILDBAND_LAB_RACK=1)
+    endif()
+endif()
+
 # ---- engine tests: no JUCE
 add_executable(wildband_tests tests/Tests.cpp)
 target_compile_options(wildband_tests PRIVATE -Wall -Wextra)

@@ -62,6 +62,7 @@ public:
     std::atomic<int> mode { 0 };
     PlanMailbox plans;                                      // written by the patch bay (message thread), read by the callback
     std::atomic<int> strikeResponse { 0 };                  // LAB: 0 Held (existing), 1 Fast, 2 Organic
+    std::atomic<int> voice { 0 };                           // LAB: 0 Resonator (the instrument), 1 Dissolve, 2 Dissolve -> Resonator
     std::atomic<bool> roomEnabled { false }, panic { false }, stallOnce { false };   // stallOnce: --measure positive control only
     // Station navigation can be mapped too. Targets from kNumParams up are actions, not knobs: PREVIOUS, NEXT, then one
     // per station slot. A controller fires an action when it rises through half way; a mapped note fires it on note-on
@@ -128,6 +129,7 @@ public:
         c.gap = radio.tuneGap.load (std::memory_order_relaxed);   // written by radio.read in the previous block
         c.request = radio.request();
         c.strikeResponse = strikeResponse.load (std::memory_order_relaxed);
+        c.voice = voice.load (std::memory_order_relaxed);
         c.plan = plans.read();                              // whole plan or the previous whole plan, never a mixture
         const auto nowMs = (int64_t) juce::Time::getMillisecondCounter();
 
@@ -775,6 +777,7 @@ private:
 
         juce::String text = juce::String (wanted != tuned ? "TUNING" : Radio::name (state)) + "  " + stations[(size_t) (wanted != tuned ? wanted : tuned)].name;
         if (instrument.engine.meterStatic.load() > 0.01f) text << "  |  static (synthesized)";
+        if (instrument.voice.load() != 0) text << "  |  LAB voice: " << (instrument.voice.load() == 1 ? "Dissolve" : "Dissolve > Resonator");
         if (state == Radio::State::Playing || state == Radio::State::Buffering) text << "  |  " << instrument.radio.detail().upToFirstOccurrenceOf (" - ", false, false) << "  |  buffer " << juce::String (instrument.radio.bufferedSeconds(), 1) << " s";
         else if (instrument.radio.detail().isNotEmpty()) text << "  |  " << instrument.radio.detail();
         if (d.offCentre > 0.0f) text << "  |  off-centre " << juce::roundToInt (d.offCentre * 100.0f) << " %";
@@ -863,8 +866,13 @@ private:
         menu.addSectionHeader ("STRIKE response (how long the steady excitation stays backed off)");
         static const char* responses[] = { "A  Held - existing: full for ~4.6 s, gone by ~14 s", "B  Fast - breathes between hits, gone in ~1.5 s", "C  Organic - swells in over ~0.6 s, eases out over ~8 s" };
         for (int i = 0; i < 3; ++i) menu.addItem (100 + i, responses[i], true, instrument.strikeResponse.load() == i);
+        menu.addSeparator();
+        menu.addSectionHeader ("Voice experiment (same knobs and cables; see docs/p0/VOICE-RESEARCH.md)");
+        static const char* voices[] = { "Resonator - the instrument as it is", "Dissolve - rolling granular delay: PITCH = time, SHAPE = echo..cloud, DRIFT = spray, FEEDBACK = regeneration", "Dissolve -> Resonator - the grains strike the resonators" };
+        for (int i = 0; i < 3; ++i) menu.addItem (200 + i, voices[i], true, instrument.voice.load() == i);
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (labButton), [this] (int result)
         {
+            if (result >= 200 && result < 203) { instrument.voice = result - 200; settingsDirty = true; flash (juce::String ("LAB voice: ") + (result == 200 ? "Resonator" : result == 201 ? "Dissolve (experimental)" : "Dissolve -> Resonator (experimental)")); }
             if (result >= 100 && result < 103) { instrument.strikeResponse = result - 100; settingsDirty = true; flash (juce::String ("LAB: STRIKE response ") + "ABC"[result - 100]); }
         });
     }
@@ -1076,6 +1084,7 @@ private:
             if (const int note = p.getIntValue ("noteAction" + juce::String (target - kNumParams), -1); note >= 0 && note < 128) instrument.noteMap[(size_t) note] = (int8_t) target;
         }
         instrument.strikeResponse = juce::jlimit (0, 2, p.getIntValue ("labStrikeResponse", 0));
+        instrument.voice = juce::jlimit (0, 2, p.getIntValue ("labVoice", 0));
         instrument.params[kLevel] = juce::jmin (instrument.params[kLevel].load(), paramDefaults[kLevel]);   // never start loud
         // "cables" stays in P0's format so both builds can share one settings file; depths live under their own key
         if (p.containsKey ("cables")) patch.graph = loadPatch (p.getValue ("cables").toStdString(), p.getValue ("cableDepths").toStdString());
@@ -1104,6 +1113,7 @@ private:
             p.setValue ("noteAction" + juce::String (target - kNumParams), note);
         }
         p.setValue ("labStrikeResponse", instrument.strikeResponse.load());
+        p.setValue ("labVoice", instrument.voice.load());
         p.setValue ("cables", juce::String (savePatch (patch.graph)));
         p.setValue ("cableDepths", juce::String (savePatch (patch.graph, true)));
         if (auto xml = devices.createStateXml()) p.setValue ("audio", xml.get());
