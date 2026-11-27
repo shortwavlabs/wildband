@@ -4,7 +4,7 @@
 
 Wildband is an exploratory Shortwav Labs project: a macOS-first electronic performance instrument driven by live internet radio, the performer's surroundings, and hands-on interaction.
 
-This repository is in **research / feasibility**. No implementation, licensing decision, platform qualification, or release commitment has been made.
+This repository is in **research / feasibility**. No implementation, platform qualification, or release commitment has been made.
 
 ## Design position
 
@@ -51,4 +51,12 @@ without an audio device; `WILDBAND.app/Contents/MacOS/WILDBAND --measure=FILE` r
 sweep (it changes the output device's sample rate and puts it back); `--mute` runs silently without touching saved
 settings; `--probe=FILE` logs which CoreAudio operation, if any, makes macOS ask for the microphone. The Blender knob is rebuilt with the two commands at the top of `assets/blender/knob.py`.
 
-Licensing is undecided. JUCE is AGPLv3 or commercial; see `docs/p0/ARCHITECTURE.md`.
+## Licence
+
+WILDBAND is free software under the **GNU Affero General Public License, version 3.0 only** (`AGPL-3.0-only`):
+see [`LICENSE`](LICENSE). Copyright © 2026 Stephane P. Pericat. It is built with JUCE under JUCE's AGPLv3 option.
+Third-party components and their licences are listed in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md); what
+has been reused from other projects, and what distributing a build obliges you to do, is in
+[`docs/LICENSING.md`](docs/LICENSING.md). Anyone who distributes a WILDBAND binary must offer its complete
+corresponding source under the same licence. The licence covers the code; it grants no rights to the Shortwav Labs or
+WILDBAND names, logos or visual identity.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Stephane P. Pericat
 // WILDBAND voice experiment D2, "Dissolve": a rolling granular delay. The incoming sound leaves a trail that runs from
 // a clear echo (TRACE, dissolve = 0) to a cloud of overlapping fragments (CLOUD, dissolve = 1).
 //

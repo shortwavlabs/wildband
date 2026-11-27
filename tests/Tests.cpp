@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Stephane P. Pericat
 // WILDBAND P0 engine tests. Plain checks, no framework; exit code = number of failed checks.
 // `wildband_tests --metrics` also prints level/brightness figures for a few control states (proxies, not listening).
 #include "../src/Engine.h"

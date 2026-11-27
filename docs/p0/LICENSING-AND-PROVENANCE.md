@@ -1,9 +1,40 @@
 # WILDBAND — Licensing and provenance inventory (for owner approval)
 
+> **Applied, 2026-11-27 (third pass).** The owner approved AGPL-3.0-only and named the copyright holder
+> (Stephane P. Pericat). `LICENSE`, SPDX and copyright headers on every WILDBAND source file,
+> `THIRD-PARTY-NOTICES.md`, the third-party licence texts in `licenses/` and [`docs/LICENSING.md`](../LICENSING.md)
+> (source-distribution obligations and the Plugin Jam reuse disclosure) now exist. This file remains the inventory
+> and its history; **`docs/LICENSING.md` is the current statement.** Mutable Instruments / Rings and Tapestry LOOP
+> provenance are in section 0a below.
+>
 > **Update, 2026-11-27 (second pass) — see section 0.** The owner has confirmed the JUCE route (AGPLv3 option) and
 > sole authorship of Korupt, Wyrd and Drift, and has authorized reuse of TALORA's architectural concepts. The
 > delegated inventory has been re-verified first-hand, and the Vult-generated code has been reproduced byte for
 > byte. **The licence itself is still not applied**: no `LICENSE` file or headers exist yet.
+
+## 0a. Third pass: Mutable Instruments (Rings) and Tapestry LOOP
+
+Both are on the approved roadmap and neither is in the repository yet.
+
+| Source | What was checked first-hand | Finding |
+|---|---|---|
+| **Rings**, upstream `pichenettes/eurorack` (read from the public fork `shortwavlabs/eurorack`, checked out as TALORA's submodule) | Header of `rings/dsp/part.h`; the repository README's licence section | Every DSP file carries "Copyright 2015 Emilie Gillet" and the **MIT** permission notice. README: "Code (AVR projects): GPL3.0. Code (STM32F projects): MIT license. Hardware: cc-by-sa-3.0". Rings is an STM32F project → MIT. `stmlib`, which it depends on, is a separate MIT repository |
+| What to take | — | Only `rings/dsp/**`, `rings/resources.*` and the `stmlib` DSP/utility headers they include, from **upstream at a pinned commit**, with headers intact, plus the MIT text in `licenses/`. Not the firmware (`drivers/`, `bootloader/`, `cv_scaler`, `ui`), not hardware files, not AVR code |
+| TALORA's Rings adapter (`modulo/src/modules/RingsAdapter.*`, `third_party/overrides`) | Not opened for this pass | Private. Covered by the concept-level authorization only (how blocks, rates and strumming were handled may inform WILDBAND's own adapter); its code and its patched upstream files are **not** copied |
+| Name | — | "Mutable Instruments" and "Rings" identify the origin in credits. WILDBAND does not present itself as a Mutable Instruments product, and the voice gets its own name in the UI |
+| **Tapestry** (`vcv-tapestry`, files `src/dsp/tapestry-*.h`) | `git log --format=%an` per file (below) | GPL-3.0-or-later per `plugin.json`. See the authorship note |
+
+**Tapestry authorship, checked for this pass** (`vcv-tapestry` at `48517c8`, `git log --format=%an -- <file>`):
+
+| File | Committers | Co-author trailers | Note |
+|---|---|---|---|
+| `tapestry-dsp.h`, `tapestry-buffer.h`, `tapestry-core.h`, `tapestry-splice.h`, `tapestry-grain.h` | the owner only | none | The files the LOOP research names. Plain C++; they include only each other |
+| `tapestry-effects.h` | the owner | **one "Co-authored-by: Copilot" trailer** | Not needed for LOOP. If it is ever wanted, that AI-assisted contribution is covered by the open question on AI authorship |
+| `Tapestry.cpp`, `TapestryExpander.*` (Rack wrapper) | the owner and `copilot-swe-agent[bot]` | several | Not to be ported in any case (Rack wrapper, file I/O) |
+
+The owner's confirmation of sole authorship (second pass) was given for Korupt, Wyrd and Drift. **It has not been
+asked for Tapestry's LOOP files**; git supports it, and the port (roadmap gate L0) should record the owner's
+confirmation before code is copied.
 
 ## 0. Second pass: decisions recorded and verification completed
 
@@ -169,7 +200,7 @@ Modelled on AFTERIMAGE, for consistency:
 
 ## 5. Decisions for the owner
 
-1. **Say "apply it"** for AGPL-3.0-only, and name the copyright holder for the headers. (JUCE route: confirmed AGPLv3.)
+1. ~~Say "apply it" for AGPL-3.0-only, and name the copyright holder.~~ **Done** (third pass).
 2. ~~Authorize, or not, `PlanMailbox`.~~ **Authorized** (section 0).
 3. Confirm Shortwav Labs holds all rights in TALORA's routing layer and is content for the derived `Patch.h` to be
    AGPL-licensed in a public repository.

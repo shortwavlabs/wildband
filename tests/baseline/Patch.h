@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Stephane P. Pericat
 // FROZEN COPY of src/Patch.h at 9c0a409, in namespace wildband_baseline. Used only by the tests. Do not edit.
 // WILDBAND P0 patch graph: a narrow adapter modelled on TALORA's routing layer (shortwavlabs/modulo,
 // src/engine/Routing.h at 91cc748). Same concepts, names and rules - typed ports with stable "module.port" ids, a

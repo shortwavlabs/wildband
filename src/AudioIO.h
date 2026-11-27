@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Stephane P. Pericat
 // Small CoreAudio layer used by the WILDBAND Room helper (microphone capture) and by the --probe diagnostic.
 // The instrument's own output goes through juce::AudioDeviceManager. Input here is a plain device IO proc that reads
 // the device's first input stream and mixes its channels to mono; output is Apple's HAL output unit (probe only).

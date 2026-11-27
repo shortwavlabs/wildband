@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Stephane P. Pericat
 // WILDBAND voice lab (docs/p0/VOICE-RESEARCH.md): renders every candidate voice over the same synthesized fixtures,
 // with a WORLD cable connected and pulled, level-matched, into WAV files for quick A/B listening, and prints a table
 // of cost, memory, level and how much WORLD changed the result.

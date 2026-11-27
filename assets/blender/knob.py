@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Stephane P. Pericat
 """WILDBAND P0 Blender -> JUCE spike: renders one knob as a vertical filmstrip (assets/knob/knob.png).
 
     /Applications/Blender.app/Contents/MacOS/Blender -b -P assets/blender/knob.py

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Stephane P. Pericat
 // Receiver-level tuner acceptance tests (docs/p0/TUNER-ACCEPTANCE.md: CT-03..CT-08, CT-15), in real time.
 // The real Radio and the real Engine, with this thread standing in for the audio callback, against
 // tools/stream_test_server.py on 127.0.0.1. Run it with tools/run_tuner_check.sh. Exit code = number of failed checks.

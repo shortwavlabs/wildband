@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Stephane P. Pericat
 // G1 evidence tool: tunes the real Radio class to each URL given, plays it into nowhere at real-time pace (this thread
 // stands in for the audio callback) and reports what happened. Usage: wildband_radio_probe [--seconds N] [--rate HZ] url...
 // With two or more URLs it also measures switching between them.

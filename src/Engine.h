@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Stephane P. Pericat
 // WILDBAND P0 engine. No JUCE, no allocation after prepare(), no locks: driven by the audio callback only.
 // Signal path: radio -> "detune" ring modulator -> [patched audio source] -> six tuned, damped delay-line resonators
 // with a saturator in each loop and a shared coupling path -> mix -> safety clip. Which control signal reaches which
