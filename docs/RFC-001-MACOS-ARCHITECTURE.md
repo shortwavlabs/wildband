@@ -46,7 +46,7 @@ After P0 owner audition, explore an auxiliary mixer with deliberately bounded fe
 - No network calls, locks with uncertain latency, decoding, file access or GUI in processBlock.
 - Rate-limited sensor measurements; timestamp, clamp and smooth; stale values ramp to neutral.
 - Audio device switches and sample-rate changes must leave the engine recoverable.
-- Streaming underrun triggers predictable decay/fallback, not discontinuities.
+- Streaming underrun triggers predictable decay/fallback, not discontinuities. Post-P0 research may make deliberate retune buffering audible as bounded, synthesized analog-inspired static routed through the patch graph, with actual receiver readiness controlling handoff, truthful status and failure fallback. See [`RADIO-TUNER-PERFORMANCE.md`](RADIO-TUNER-PERFORMANCE.md) for manual/MIDI station hopping, dial sweep, safety, and later trigger-based tuning. This is a proposal, not a change to P0 acceptance.
 - Controlled gain/feedback bounds and fail-safe mute.
 - macOS sleep/wake, internet outages, captive portals, denied mic permission and headphones disconnect must all have explicit behavior.
 - Preserve only configuration, not private observations or stream audio.
