@@ -4,6 +4,8 @@
 
 WILDBAND is a macOS-first live electronic instrument. Its sound source is a live radio broadcast; its behavior is influenced by the performer's gestures and optionally by their physical and remote environment. It is for *performing in the moment*, not capturing, sampling, exporting, archiving or re-creating a fixed musical result.
 
+The owner's detailed creative direction is recorded in [Instrument Design & Experience Manifesto](INSTRUMENT-DESIGN-MANIFESTO.md): a cohesive semi-modular instrument, distinctive sound, meaningful WORLD coupling, playful discovery and the favorite guitar test. Candidate functions are curated, not a general-purpose modular rack.
+
 ## Creative thesis
 
 A guitar or modular synthesizer is fun because the musician interacts with a responsive system whose outcome is shaped by performance and context. WILDBAND tests whether computer-based instruments can deliver a similar relationship. The same configuration should preserve a recognizable character while the incoming broadcast, room activity and gestures change. **The patch is a set of conditions, not a finished composition.**
