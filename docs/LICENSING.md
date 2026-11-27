@@ -41,9 +41,27 @@ Whenever a WILDBAND binary is given to anyone — a download, the Plugin Jam sub
 6. Do not add terms that restrict these rights (no extra EULA on the open-source build).
 7. Signing and notarization do not change any of this: a notarized binary still needs its source offer.
 
+### Corresponding source: every dependency of the distributed configuration
+
+"Complete corresponding source" means everything needed to rebuild **the binary that was actually shipped**, in the
+configuration it was built with — not just this repository. Record, for each release, the exact configure command
+and every external source it pulled in:
+
+| Dependency | When it is compiled in | What the source offer must identify |
+|---|---|---|
+| WILDBAND (this repository) | always | the release tag |
+| JUCE | always | commit `d60b7a78030661574a615b586d9325ba7a7fa7dd` (pinned in `CMakeLists.txt`) |
+| Third-party code inside JUCE (zlib, HarfBuzz, SheenBidi, LunaSVG/PlutoVG, libpng, IJG jpeglib) | always, via JUCE | covered by the JUCE commit; licence texts in `licenses/` |
+| VST3 SDK, AudioUnitSDK | plugin builds | covered by the JUCE commit; licence texts in `licenses/` |
+| **Rings** (`pichenettes/eurorack` at `f4cfa7697095a28d292bff758beb51deb49b5a86`) and **stmlib** (`pichenettes/stmlib` at `e3bd7c9cc00e4364166f9905c0509b6ffd0535ec`), MIT | only with `-DEURORACK_DIR` or `-DWILDBAND_FETCH_RINGS=ON` | both repositories and commits; `licenses/Rings-stmlib-MIT.txt` in the bundle |
+| Any other optional upstream enabled at configure time | **only if enabled** | the upstream repositories and exact commits, and their licence texts in the bundle. A build that enables an optional upstream ships that upstream's source obligations too |
+
+A release built from a configuration not listed here is not ready to ship.
+
 ### Release checklist
 
 - [ ] Tag the commit; build from a clean checkout of the tag.
+- [ ] Record the exact configure command; list every optional upstream it enables, with repository and commit.
 - [ ] Regenerate `THIRD-PARTY-NOTICES.md` from `JUCE.spdx.json` and the release build's dependency files
       (the AU/VST3 targets add the VST3 SDK and AudioUnit SDK).
 - [ ] `LICENSE`, `THIRD-PARTY-NOTICES.md`, `licenses/` present inside every bundle and in the installer.

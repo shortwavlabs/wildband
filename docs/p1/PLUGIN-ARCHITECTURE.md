@@ -113,12 +113,11 @@ save/reload), VST3 conformance (no validator is installed here), signing, notari
 9. **Network at instantiation.** The plugin starts fetching the station about 250 ms after it is created, so `auval`,
    a host's plug-in scan and every new instance open a connection to the default station. Better to wait for
    `prepareToPlay` (a scan never calls it); not changed yet.
-10. **Shared random state in Rings' string model.** `stmlib::Random` keeps one *static* state for the whole process
-    (`rng_state_`), used by Rings' string model for its noise. Two instances (or the engine and anything else in the
-    same process) using that model share it unsynchronised: the noise is correlated between instances and,
-    strictly, it is a data race. Harmless in sound, but it contradicts "nothing is shared" above. TALORA dealt with
-    this by patching upstream; here the options are a per-instance replacement for `random.cc` or accepting it while
-    Rings is only an experiment. Relevant only to builds with Rings.
+10. **Shared random state in Rings' string model: a data race.** `stmlib::Random` keeps one *static* state for the
+    whole process (`rng_state_`), read and written without synchronisation by Rings' string model. Two instances in
+    one host run that code on different threads at once: that is a data race and undefined behaviour, and it
+    contradicts "nothing is shared" above. Recorded as a **mandatory production fix if Rings is selected**
+    (`RINGS-EXPERIMENT.md`). Relevant only to builds with Rings.
 
 The final build of this branch (`910199d`, after the review fixes) was launched: muted live navigation behaved as
 before and left the shared settings untouched; the AU was reinstalled from it, `auval` passes again, and the
