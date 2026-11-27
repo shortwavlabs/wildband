@@ -134,13 +134,8 @@ are release blockers, not polish:
   loudness, when comparing.
 - Upstream's own reverb and limiter are left as they are; they are part of what is heard.
 - Rings is fetched from outside the repository; a build without it has no Rings voices.
-<<<<<<< HEAD
-- `stmlib::Random` keeps one static state per process, used by the string model's noise: two instances share it
-  (see `PLUGIN-ARCHITECTURE.md`, open item 10).
-=======
 - `stmlib::Random` keeps one static state per process, used without synchronisation by the string model: with two
   instances this is a data race (see "Mandatory production fixes" above).
->>>>>>> origin/p1/rings
 
 ### How to audition
 
