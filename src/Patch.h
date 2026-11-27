@@ -1,8 +1,9 @@
 // WILDBAND P0 patch graph: a narrow adapter modelled on TALORA's routing layer (shortwavlabs/modulo,
 // src/engine/Routing.h at 91cc748). Same concepts, names and rules - typed ports with stable "module.port" ids, a
 // fixed-capacity value-type Graph that validates every cable off the audio thread, inputs take one cable, outputs fan
-// out without limit, and the audio thread only ever sees a plain-data RoutingPlan. No TALORA source is copied here
-// (modulo is a private repository without a licence file; this one is public). What differs and why:
+// out without limit, and the audio thread only ever sees a plain-data RoutingPlan. Graph::check below is re-typed from
+// TALORA's, rule for rule; no TALORA file is included (modulo is a private repository without a licence file, this
+// one is public - whether even this much may be published is the owner's decision). What differs and why:
 // docs/p0/TALORA-REUSE.md. tests/TaloraParity.cpp checks this Graph against the real one when TALORA is on disk.
 #pragma once
 

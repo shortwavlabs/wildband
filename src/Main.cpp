@@ -30,10 +30,6 @@ const Station kDefaultStations[] = {
     { "SomaFM SF 10-33", "https://ice2.somafm.com/sf1033-128-mp3" } };
 constexpr int kNumStations = (int) std::size (kDefaultStations);
 
-// Default controller numbers: an UNVERIFIED guess at a Launch Control XL factory template's top knob row.
-// MIDI learn is the supported way to map a controller; nothing depends on these.
-constexpr int kDefaultCc[kNumParams] = { 13, 14, 15, 16, 17, 18, 19, 20, 77 };
-
 // ---------------------------------------------------------------------------------------------------------------------
 /** Everything the audio and MIDI threads touch. The UI talks to it through atomics only. */
 class Instrument final : public juce::AudioIODeviceCallback, public juce::MidiInputCallback
@@ -43,8 +39,7 @@ public:
     {
         for (int i = 0; i < kNumParams; ++i) params[(size_t) i] = paramDefaults[i];
         params[kTune] = dialCentre (0, kNumStations);
-        for (auto& c : ccMap) c = -1;
-        for (int i = 0; i < kNumParams; ++i) ccMap[(size_t) kDefaultCc[i]] = (int8_t) i;
+        for (auto& c : ccMap) c = -1;      // no controller is mapped until MIDI LEARN maps one: no guessed defaults
         plan = RoutingPlan::fromGraph (Graph::defaultPatch()).pack();
     }
 
@@ -454,12 +449,12 @@ public:
         patch.onMessage = [this] (const juce::String& m) { flash (m); };
         patch.onChange();
 
-        // KNOWN DEFECT (docs/p0/EVIDENCE-LOG.md): when the output device also has inputs (most USB interfaces), macOS
-        // shows its microphone prompt as soon as CoreAudio opens the device, and blocks this thread until it is
-        // answered, although no input is requested. So the window goes up first, with an explanation, and the device
-        // is opened a moment later (openAudio, from the timer).
+        // KNOWN DEFECT (docs/p0/EVIDENCE-LOG.md): macOS has shown its microphone prompt while CoreAudio opened the
+        // output device, and blocked this thread until it was answered, although no input is requested. The cause is
+        // not established (a device with inputs is the suspect). So the window goes up first, with a note, and the
+        // device is opened a moment later (openAudio, from the timer).
         if (microphoneAccess() == MicAccess::Undetermined)
-            roomMessage = "If macOS asks about the microphone now, it is because your audio interface has inputs. WILDBAND listens only while ROOM is on; either answer works.";
+            roomMessage = "macOS may ask about the microphone now, although WILDBAND has not asked for it. It only listens while ROOM is on. Sound starts once you answer.";
         openMidiInputs();
         midiList = juce::MidiDeviceListConnection::make ([this] { openMidiInputs(); });
 
@@ -478,7 +473,7 @@ public:
         closeInputs();
         devices.addAudioCallback (&instrument);
         devices.addChangeListener (this);
-        if (roomMessage.startsWith ("If macOS asks")) roomMessage.clear();
+        if (roomMessage.startsWith ("macOS may ask")) roomMessage.clear();
         if (measurePath.isNotEmpty()) beginMeasure();
     }
 
@@ -643,7 +638,8 @@ private:
                 setup.inputDeviceName = type->getDeviceNames (true)[type->getDefaultDeviceIndex (true)];
             setup.useDefaultInputChannels = true;
             const auto error = setup.inputDeviceName.isEmpty() ? juce::String ("no input device") : safe->devices.setAudioDeviceSetup (setup, true);
-            if (error.isNotEmpty() || safe->instrument.inputChannels.load() == 0)
+            auto* device = safe->devices.getCurrentAudioDevice();
+            if (error.isNotEmpty() || device == nullptr || device->getActiveInputChannels().isZero())
             {
                 safe->roomButton.setToggleState (false, juce::dontSendNotification);
                 safe->roomMessage = "Could not open the microphone (" + (error.isNotEmpty() ? error : juce::String ("no input channels")) + "). ROOM stays neutral.";
@@ -667,7 +663,8 @@ private:
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override
     {
-        if (instrument.roomEnabled.load() && instrument.inputChannels.load() == 0)      // the input went away under us
+        auto* device = devices.getCurrentAudioDevice();
+        if (instrument.roomEnabled.load() && (device == nullptr || device->getActiveInputChannels().isZero()))   // the input went away under us
         {
             instrument.roomEnabled = false;
             roomButton.setToggleState (false, juce::dontSendNotification);
@@ -753,7 +750,7 @@ private:
         auto* device = devices.getCurrentAudioDevice();
         measureLog << "Device: " << (device != nullptr ? device->getName() : "none") << ", " << juce::SystemStats::getOperatingSystemName() << ", " << juce::SystemStats::getDeviceDescription()
                    << ", " << juce::Time::getCurrentTime().toISO8601 (true) << "\n\n"
-                   << "| rate | buffer (asked/got) | period ms | callbacks | mean us | p99.9 us | max us | max % of period | late callbacks | max host-time gap ms | radio underruns | reconnects | engine faults |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n";
+                   << "| rate | buffer (asked/got) | period ms | callbacks | mean us | p99.9 us | max us | max % of period | late callbacks | max host-time gap ms | radio underruns | reconnects | engine faults | radio state at end | buffered s | radio level 0..1 |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n";
         measureOriginal = devices.getAudioDeviceSetup();
         measureIndex = -1;
         measureNext = juce::Time::getMillisecondCounter() + 6000;      // let the stream start first
@@ -782,7 +779,8 @@ private:
             measureLog << "| " << step.rate << " (" << fs << ") | " << step.buffer << " / " << instrument.blockSize.load() << " | " << juce::String (period, 3) << " | " << (juce::int64) perf.callbacks.load()
                        << " | " << juce::String (perf.sumUs.load() / n, 1) << " | " << juce::roundToInt (perf.percentileUs (0.999)) << " | " << juce::roundToInt (perf.maxUs.load())
                        << " | " << juce::String (period > 0 ? perf.maxUs.load() / (period * 10.0) : 0.0, 1) << " | " << (juce::int64) perf.lateCallbacks.load() << " | " << juce::String (perf.maxGapMs.load(), 2)
-                       << " | " << instrument.radio.underruns.load() - underruns0 << " | " << instrument.radio.reconnects.load() - reconnects0 << " | " << instrument.engine.faults.load() << " |\n";
+                       << " | " << instrument.radio.underruns.load() - underruns0 << " | " << instrument.radio.reconnects.load() - reconnects0 << " | " << instrument.engine.faults.load()
+                       << " | " << Radio::name (instrument.radio.state()) << " | " << juce::String (instrument.radio.bufferedSeconds(), 1) << " | " << juce::String (instrument.engine.meterRadioLevel.load(), 2) << " |\n";
         }
         if (++measureIndex >= measureSteps.size())
         {

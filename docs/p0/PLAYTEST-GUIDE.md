@@ -12,10 +12,16 @@ positions, the six station addresses, the patch and the MIDI map.
 open build/WILDBAND_artefacts/Release/WILDBAND.app
 ```
 
-- **macOS will probably ask for the microphone as soon as it starts**, if your audio interface has inputs (the
-  MiniFuse does). That is a known defect: the app has not asked for it and does not listen until ROOM is on. Either
-  answer is fine; choose **Allow** if you want to try ROOM later. One such prompt may already be on your screen from
-  testing — it was left for you to answer.
+- **A macOS microphone prompt for WILDBAND is probably already on your screen**, left unanswered from testing, and
+  macOS may ask again when the app starts. This is a known defect: the app has not asked for the microphone and does
+  not listen until ROOM is on, yet it produces no sound until the prompt is answered. The cause is not established.
+- **Please check both answers, "Don't Allow" first.** Whether the instrument still plays after "Don't Allow" has
+  never been tested; if it stays silent, that is a second defect worth knowing before anything else. To get the
+  question again afterwards:
+
+```bash
+tccutil reset Microphone com.shortwavlabs.wildband
+```
 
 ## How do I start a live radio stream?
 
@@ -62,9 +68,10 @@ feed several inputs; each input takes one cable.
 
 ## How do I connect a MIDI controller?
 
-Plug it in; every MIDI input is opened automatically (also when plugged in later). Tick **MIDI LEARN**, touch a
-knob on screen, move a control on the hardware. The knob's label shows its controller number. The numbers shown at
-first start are a guess and may not match your controller. Keys or pads set PITCH.
+Plug it in; every MIDI input is opened automatically (also when plugged in later). Nothing is mapped at first.
+Tick **MIDI LEARN**, touch a knob on screen, move a control on the hardware; the knob's label then shows its
+controller number and the mapping is remembered. Repeat per knob. Keys or pads set PITCH. No MIDI hardware has been
+tried with this build.
 
 ## Which controls should I try first?
 
@@ -118,11 +125,11 @@ Leave it running for an hour and note any re-buffering.
 
 ## Known limitations
 
-- The microphone prompt at launch, described above.
+- The microphone prompt at launch, described above; denying it is untested.
 - MP3 and AAC only: no Ogg, Opus, FLAC or HLS stations.
 - The radio is a few seconds behind the broadcast; a retune takes up to about two seconds.
 - Control cables only push one way; one cable per input.
 - No presets, no undo for cables, no keyboard control, no accessibility work.
 - Only the output device can be chosen; ROOM uses the system's default input.
-- Ad-hoc signed: it runs on this Mac. macOS may repeat the microphone question after a rebuild.
+- Ad-hoc signed: it runs on this Mac. macOS may ask about the microphone again after a rebuild.
 - Tested for minutes on one audio interface. Not tested across sleep, device changes or network loss.

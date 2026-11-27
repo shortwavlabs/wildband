@@ -18,9 +18,10 @@ the plan hand-off in `src/engine/ModuloEngine.{h,cpp}`, the two editors' headers
 | Cable UI | `ui/prototype-3d` (Three.js in a JUCE WebView); the native editor only has buttons | Node toolchain, WebView, GLB assets | **No** native cable component exists to reuse |
 | Tests | `tests/patch_protocol_tests.cpp`, `graph_capacity_tests.cpp`, `p1_tests.cpp` (1 844 lines) | TALORA engine | They test TALORA's registry |
 
-## Decision: a narrow, compatible adapter — not a copy, not yet a shared library
+## Decision: a narrow, compatible adapter — not a file copy, not yet a shared library
 
-`src/Patch.h` (about 150 lines) re-implements the part WILDBAND needs with TALORA's names and rules: `PortType`,
+`src/Patch.h` (about 150 lines) is **re-typed from TALORA**: it keeps TALORA's names and rules, and its
+`Graph::check` follows TALORA's rule for rule. It is derived work, not independent work. It covers: `PortType`,
 `PortDirection`, `PortSpec`, `ConnectError`, `Connection`, `Graph::check/connect/disconnect/cableInto`, one cable
 per input, unlimited fan-out, a plain-data `RoutingPlan` built off the audio thread, and the `from|to` cable id
 format for saved patches.
@@ -29,6 +30,9 @@ Why not copy `Routing.{h,cpp}` into this repository:
 
 - **`modulo` is private and has no licence file; `wildband` is public.** Copying would publish private source, and
   under whichever licence WILDBAND ends up with. That is the owner's call, not something to do in passing.
+  The same question applies, on a smaller scale, to what *is* here: the re-typed validation rules in `src/Patch.h`,
+  `tests/TaloraParity.cpp` (which encodes TALORA's `PortSpec` layout), and this document's description of the
+  private repository's structure. **The owner was asked before any of it was pushed to the public repository.**
 - `Routing.cpp` carries TALORA's whole rack registry; WILDBAND would compile a port table it never uses.
 
 Why not extract a shared library now: it means changing `modulo` (splitting the registries and the plan out of

@@ -7,7 +7,7 @@ Everything here was produced on one machine on 2026-11-27. "Not done" means not 
 | Machine | MacBook Pro `Mac17,6`, Apple Silicon (arm64) |
 | OS / tools | macOS 26.6.2 (25G83), Xcode 27.2, CMake 4.5.1, JUCE 9.0.5 (`d60b7a78`), Blender 5.2.1 LTS |
 | Audio | Output: Arturia MiniFuse 1 (USB, duplex). Default input: MacBook Pro Microphone (44.1 kHz) |
-| Network | Home broadband, no VPN details recorded |
+| Network | Not recorded |
 | Listening | **None.** The author of this prototype cannot hear. Every run was muted (LEVEL forced to 0) |
 
 ## Gate status
@@ -46,45 +46,62 @@ Not covered by automated tests: `Radio` (exercised by the probe instead), the ap
 
 ## CoreAudio callback timing
 
-`WILDBAND.app --measure=docs/p0/evidence/coreaudio-minifuse.md`: the real app on the real device, radio live,
-engine in its heaviest ordinary state (FEEDBACK 0.85, DRIFT 0.7, COUPLE 0.8), output muted, 20 s per setting after
-5 s of settling. Time is measured around the whole callback (ring read, test source, engine). Full table:
+`WILDBAND.app --measure=docs/p0/evidence/coreaudio-minifuse.md`: the real app on the real device, knobs at
+FEEDBACK 0.85, DRIFT 0.7, COUPLE 0.8, output muted, 20 s per setting after 5 s of settling. Time is measured around
+the whole callback (ring read, test source, engine). Full table:
 [`evidence/coreaudio-minifuse.md`](evidence/coreaudio-minifuse.md).
+
+**What these runs did not record:** whether the radio was actually playing during each window. The stream restarts
+at every rate change, and the sweep logged neither the radio state nor its level, so in some windows the engine may
+have been processing silence, which is cheaper (see the synthetic figures below). The tool now logs radio state,
+buffered seconds and radio level per row; the sweep could not be re-run because of the unanswered microphone
+prompt. **Read the table as callback timing with the engine in an unknown state of excitation.**
 
 | | Result |
 |---|---|
 | Settings | 44.1 / 48 / 96 kHz × 32 / 64 / 128 / 512 samples, all granted by the device |
-| Worst callback, as a share of its buffer period | **4.5 %** (96 kHz / 64: 30 µs of 667 µs). A first run, kept below, had 5.5 % at 96 kHz / 32 |
+| Worst callback, as a share of its buffer period | **4.5 %** (96 kHz / 64: 30 µs of 667 µs). A first run, summarised below, had 5.5 % at 96 kHz / 32 |
 | Late callbacks (host-time gap above 1.5 periods) | 0 in all twelve settings |
 | Positive control | One callback deliberately held for three periods: counted as late (1), host-time gap 21.5 ms. The counter does respond |
 | Radio underruns / reconnects / engine faults | 0 / 0 / 0 |
 
 Limits of this evidence: one device, one machine, 20 s per setting, editor window open, no other load, ROOM off
-(no input stream), and nothing was listened to. Per-sample cost is not constant across settings (for example about
-0.30 µs/sample at 48 kHz / 512 against 0.15 at 96 kHz / 512); this was not investigated and is probably CPU
-frequency or core scheduling. JUCE's xrun counter was not used: AFTERIMAGE's P1-B work found it does not move on
-this macOS.
+(no input stream), and nothing was listened to. Per-sample cost is not constant across settings (about 0.10
+µs/sample at 96 kHz / 32, 0.30 at 48 kHz / 512). That is unexplained: an idle engine in some windows and CPU
+frequency or core scheduling are both possible, and neither was tested. JUCE's xrun counter was not used:
+AFTERIMAGE's P1-B work found it does not move on this macOS.
+
+Synthetic cross-check (`wildband_tests --metrics`, one thread, no audio device — **not** a CoreAudio measurement):
+`Engine::process` alone costs about **44 ns per sample on silence and 74 ns on noise** with the same knob settings
+(four runs, within 1 ns). So a ringing engine costs roughly 30 ns per sample more than an idle one. If every sweep
+window had been idle, the worst row (30 µs for 64 samples at 96 kHz) would rise by about 2 µs, from 4.5 % to about
+4.8 % of the period. The headroom conclusion does not depend on what the radio was doing; the exact figures do.
 
 First run, for the record (no positive control, so its zeros alone proved nothing): worst 5.5 % at 96 kHz / 32
 (18 µs of 333 µs); 0 late callbacks, underruns, reconnects and faults.
 
-## First-launch block: macOS asks for the microphone although no input is requested
+## Launch block: macOS asks for the microphone although no input is requested
 
-- **Seen:** on its first launch, and again after a later rebuild, the app froze inside
-  `AudioDeviceManager::initialise` → `AudioDeviceCreateIOProcIDWithBlock` (process sample). The second time, the
-  system dialog *"WILDBAND" would like to access the Microphone* was on screen.
-- **Cause, as far as established:** the app asks JUCE for 0 inputs and 2 outputs, but CoreAudio raises the consent
-  prompt when a device that has input streams is opened, and holds the call until it is answered. JUCE gives no way
-  to mark the input streams unused. Whether this also happens with an output-only device (built-in speakers) could
-  not be separated, because the unanswered prompt blocked every later launch.
-- **Why it matters:** PRD P0-08 says no automatic microphone permission. The app never *reads* the microphone until
-  ROOM is on, but the *prompt* appears unasked on duplex interfaces. That is a defect against the requirement.
-- **Mitigation in the prototype:** the window now opens first and says why macOS may be asking; the audio device is
-  opened a quarter of a second later. Either answer should leave the output working — **not verified**.
-- **Because the app is ad-hoc signed, macOS may ask again after each rebuild.**
-- **The prompt was left unanswered.** Answering it is the owner's decision.
-- **Fix candidates (not done):** open the output with a small CoreAudio HAL unit that disables input streams, or
-  patch JUCE's CoreAudio device to set the IOProc stream usage.
+- **Seen:** on its first launch the app froze for a minute or two inside `AudioDeviceManager::initialise` →
+  `AudioDeviceCreateIOProcIDWithBlock` (process sample), then carried on by itself. Several rebuilt copies then
+  launched without blocking, including both timing sweeps. After a later rebuild it froze in the same place, and
+  this time the system dialog *"WILDBAND" would like to access the Microphone* was on screen (window capture).
+- **What is established:** the app asks JUCE for 0 inputs and 2 outputs; the microphone prompt appeared anyway; the
+  CoreAudio call does not return while the prompt is pending.
+- **What is not established:** the cause. The suspect is that the output device (MiniFuse 1) also has inputs, but
+  two launches forced onto the built-in speakers also never opened an audio device — while the earlier prompt was
+  still on screen, so that test separates nothing. Why some rebuilt copies prompted and others did not is also
+  unexplained (the app is ad-hoc signed, so macOS may treat a rebuild as a new program). How the first block
+  cleared is unknown.
+- **Why it matters:** PRD P0-08 says no automatic microphone permission. The app does not *read* the microphone
+  until ROOM is on, but a *prompt* that appears unasked is a defect against that requirement.
+- **Never run:** the "Don't Allow" path. If denying leaves the app with no audio output, that also fails PRD P0-07.
+  **This is the first thing for the owner to check.**
+- **Mitigation in the prototype:** the window now opens first with a note; the audio device is opened a quarter of
+  a second later.
+- **The prompt was left unanswered** and was still on screen at hand-over. Answering it is the owner's decision.
+- **Fix candidates (not done, and unproven until the cause is known):** open the output with a small CoreAudio HAL
+  unit that disables input streams, or patch JUCE's CoreAudio device to set the IOProc stream usage.
 
 ## Blender → JUCE spike (PRD P0-10)
 
@@ -98,6 +115,6 @@ and resizing stay in JUCE. Checked from an offscreen snapshot of the real UI
 ## Not done
 
 Listening of any kind; a real microphone; mouse interaction with the patch bay or knobs; any MIDI hardware (one
-MIDI input was detected, nothing was received); the default controller numbers (an unverified guess); sleep/wake;
+MIDI input was detected, nothing was received; no controller is mapped until MIDI LEARN is used); sleep/wake;
 switching output devices while playing; internet loss; revoking microphone access; sessions longer than a few
 minutes; any second Mac.

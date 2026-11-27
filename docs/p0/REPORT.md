@@ -32,7 +32,7 @@ A macOS standalone app (JUCE 9.0.5, C++20, CMake) in which:
 | Live radio can be received and switched on macOS with no codec dependency | Six stations from five operators, MP3 and AAC, `http` and `https`, 0.2–1.7 s to first audio on a switch |
 | Interrupted streams recover | Closed and stalled connections reconnect (local test server) |
 | The engine is safe at the extremes | 442 automated checks: bounded output, no NaN, no allocation, block-size independent, click-free control and patch changes |
-| It fits comfortably in a CoreAudio callback | Worst case 4.5–5.5 % of the buffer period down to 32 samples at 96 kHz on one USB interface; a positive control shows the late-callback counter works |
+| It fits comfortably in a CoreAudio callback | Worst case 4.5–5.5 % of the buffer period down to 32 samples at 96 kHz on one USB interface; a positive control shows the late-callback counter works. Caveat: the sweep did not log whether the radio was playing, so the engine's state in each window is unknown; a synthetic check puts the difference at about 30 ns per sample |
 | The room and the broadcast change the sound only through cables, scaled by COUPLE | Tested numerically for every cable |
 | TALORA's patching rules carry over | Adapter agrees with TALORA's real `Graph` on 120 000 random edits |
 | A Blender-rendered control can be driven by JUCE | One knob, checked in a snapshot |
@@ -56,21 +56,22 @@ A macOS standalone app (JUCE 9.0.5, C++20, CMake) in which:
 
 ## Defects and limitations found
 
-1. **macOS asks for the microphone at first launch on audio interfaces that have inputs**, before ROOM is pressed.
-   This breaks the "no automatic microphone permission" requirement (PRD P0-08). Mitigated with an on-screen
-   explanation; not fixed (`EVIDENCE-LOG.md`).
+1. **macOS has asked for the microphone at launch, before ROOM is pressed, and the app waits until the prompt is
+   answered.** This breaks the "no automatic microphone permission" requirement (PRD P0-08). The cause is not
+   established (an output device that also has inputs is the suspect), it did not happen on every launch, and the
+   "Don't Allow" path has never been run. An on-screen note was added; nothing is fixed (`EVIDENCE-LOG.md`).
 2. The radio is several seconds behind the broadcast (up to 6 s of buffer).
 3. Station and Mac clocks are not synchronised; a slow station will eventually cause a 0.75 s re-buffer.
 4. Ogg/Opus/FLAC and HLS streams are refused. Some stations only offer those.
 5. Control signals are unipolar: a cable can only push a parameter one way.
 6. An input takes one cable; two sources cannot be mixed into one destination.
-7. The default MIDI controller numbers are an unverified guess. MIDI learn is the real mechanism.
+7. No MIDI controller is mapped by default; MIDI learn is the mechanism. No hardware has been tried.
 8. Speakers plus microphone form a loop through the control path. It is bounded (ROOM can add at most 0.2 of loop
    gain, the loops saturate, the output is clipped at −1 dBFS) but it will be audible as the instrument "pumping
    itself". Headphones remove it.
 9. Bluetooth headsets switch to a low-quality mode when their microphone opens; ROOM uses the default input.
-10. The app is ad-hoc signed: other Macs will refuse it without a Developer ID build, and macOS may repeat the
-    microphone question after a rebuild.
+10. The app is ad-hoc signed: other Macs will refuse it without a Developer ID build, and macOS may treat each
+    rebuild as a new program when it remembers the microphone decision.
 
 ## Go / revise / stop
 
@@ -87,8 +88,8 @@ Not decided here; it depends on the listening sessions. The prototype is built s
 
 Technical:
 
-1. Can the output be opened without triggering the microphone prompt (HAL unit with inputs disabled, or a JUCE patch)?
-2. Does "Don't Allow" leave the output working on a duplex interface? Does revoking access mid-session?
+1. What actually triggers the microphone prompt at launch, and can the output be opened without it?
+2. Does "Don't Allow" leave the output working? Does revoking access mid-session?
 3. How should clock drift be handled over a long session: adaptive resampling, or let the buffer breathe?
 4. Is a 6 s buffer the right trade between resilience and "live"? Would 1–2 s survive real networks?
 5. What happens on sleep/wake, on losing Wi-Fi, on unplugging the interface?

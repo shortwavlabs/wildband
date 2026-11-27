@@ -4,6 +4,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <pthread.h>
 #include <random>
 
@@ -439,6 +440,24 @@ void metrics()
         for (size_t i = 2; i < y.size(); i += 2) zc += (y[i] >= 0) != (y[i - 2] >= 0);
         const float r = rms (y), p = peak (y);
         std::printf ("%-34s %8.1f %8.1f %8.1f %10.0f\n", s.name, 20 * std::log10 (r + 1e-9f), 20 * std::log10 (p + 1e-9f), 20 * std::log10 (p / (r + 1e-9f)), 0.5 * zc / 8.0);
+    }
+
+    // synthetic cost of Engine::process alone, single thread, no audio device: NOT a CoreAudio measurement
+    std::printf ("\nEngine::process cost, synthetic (48 kHz, block 64, 20 s of audio per row)\n%-28s %14s\n", "input", "ns per sample");
+    for (int kind = 0; kind < 2; ++kind)
+    {
+        const auto in = kind == 0 ? Buf (64, 0.0f) : noise (64, 0.3f);
+        auto c = defaults();
+        c.p[kFeedback] = 0.85f; c.p[kDrift] = 0.7f; c.p[kCouple] = 0.8f;
+        Engine e;
+        e.prepare (fs);
+        Buf l (64), r (64);
+        const int blocks = (int) (fs * 20 / 64);
+        timespec t0, t1;
+        clock_gettime (CLOCK_MONOTONIC, &t0);
+        for (int b = 0; b < blocks; ++b) e.process (in.data(), in.data(), in.data(), l.data(), r.data(), 64, c);
+        clock_gettime (CLOCK_MONOTONIC, &t1);
+        std::printf ("%-28s %14.1f\n", kind == 0 ? "silence (engine idle)" : "noise (engine ringing)", ((double) (t1.tv_sec - t0.tv_sec) * 1e9 + (double) (t1.tv_nsec - t0.tv_nsec)) / (blocks * 64.0));
     }
 }
 } // namespace

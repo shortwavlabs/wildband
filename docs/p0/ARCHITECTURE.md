@@ -127,7 +127,8 @@ was added. Facts the decision has to account for:
 - JUCE vendors third-party code (zlib, HarfBuzz, libpng, …). A third-party notice derived from JUCE's SPDX file is
   needed before any distribution; none has been written.
 - MP3/AAC decoding uses Apple's system decoders, so no codec library is distributed.
-- TALORA (`modulo`) is private and has no licence file; none of its source is in this repository.
+- TALORA (`modulo`) is private and has no licence file. None of its files is in this repository, but `src/Patch.h`
+  is re-typed from its routing layer (see `TALORA-REUSE.md`), which the eventual licence has to cover.
 - Station streams are third parties' broadcasts. Only their public addresses are in the source, as editable
   defaults. Whether they may appear in demos or marketing has not been investigated.
 
@@ -141,9 +142,8 @@ whether this particular instrument is good to play.
 ## Unresolved risks
 
 1. Nobody has listened to it. Everything about the sound is unproven until the owner plays it.
-2. First launch blocked for over a minute inside CoreAudio device creation on a duplex USB interface, which is
-   consistent with macOS showing its microphone prompt although the app requested no inputs. Not confirmed (see
-   `EVIDENCE-LOG.md`, "First-launch block").
+2. macOS showed its microphone prompt while the app was opening the *output* device, and the app waited on it,
+   although no input was requested. The cause is not established (`EVIDENCE-LOG.md`, "Launch block").
 3. Microphone plus speakers is a real acoustic loop through the control path, even with no mic audio in the output.
 4. The station and the Mac run on different clocks; nothing corrects the drift (see `RADIO-COMPATIBILITY.md`).
 5. Retuning takes 0.2–2 s of network time. The instrument covers it musically (fade, ring-out); whether that feels

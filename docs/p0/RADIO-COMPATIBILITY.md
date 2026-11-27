@@ -57,8 +57,8 @@ Five independent operators; music, speech (BBC) and a noisy speech/ambient mix (
 peak was 1.07, above full scale; the engine clamps its input.
 
 Inside the built, ad-hoc-signed app: SomaFM Groove Salad (`https`) reached LIVE with a 6.0 s buffer at 48 kHz
-(screenshot of the status line). During two 5-minute timing sweeps the receiver reported 0 underruns and 0
-reconnects in every 20 s window; the stream is restarted at each sample-rate change by design. **Plain `http://` stations have not been confirmed inside the app** (the attempt was blocked by the
+(seen in a capture of the app's status line, on the first muted launch). That is the only in-app observation of a
+playing stream: the timing sweeps did not log the radio state. **Plain `http://` stations have not been confirmed inside the app** (the attempt was blocked by the
 microphone prompt described in `EVIDENCE-LOG.md`); the Info.plist exception that permits them is present.
 
 ## Evidence: awkward servers
