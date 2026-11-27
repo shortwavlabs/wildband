@@ -1,6 +1,6 @@
 # WILDBAND — Product Roadmap
 
-**Version 1.1 | 2026-11-27 | Owner-agreed planning direction.** Candidate implementations, DSP choices, design and release gates still require evidence. Includes Rings as a priority resonator experiment, ATMOSPHERE and macOS AUv3 feasibility.
+**Version 1.2 | 2026-11-27 | Owner-agreed planning direction.** Candidate implementations, DSP choices, design and release gates still require evidence. Includes Rings as a priority resonator experiment, ATMOSPHERE and macOS AUv3 feasibility.
 
 **Play the world. The world is your oscillator.**
 
@@ -14,11 +14,11 @@ Compelling normalled sound first; patching opens deeper possibilities. Real exte
 
 [Official Plugin Jam rules](https://www.theaudioprogrammer.com/events/plugin-jam-rules), verified November 27: register and submit via Freqlab by **January 31, 2027, 11:59 pm Pacific Time**. Working signed AU, VST3 or CLAP on Mac and/or Windows; notarized on Mac; public GitHub repository with OSI-approved license; demo of at most three minutes on YouTube/Vimeo; disclose reused code and license/credit third-party material. Developer accounts are needed for signing. Standalone alone is not eligible. Recheck rules, marketplace and supported upload formats before delivery. Finale February 12.
 
-**Target:** macOS standalone + conventional AU (AUv2). macOS AUv3 is an early feasibility target and desired additional format if qualified; VST3 additionally if time permits. Do not make AUv3, VST3 or iPadOS a dependency for the contest entry. Confirm AUv3 acceptance with Freqlab before counting it as the qualifying binary.
+**Target:** macOS standalone + conventional AU (AUv2) + VST3. VST3 is a planned release format, not stretch; share JUCE processor/editor and service abstractions. macOS AUv3 is an early feasibility target and desired additional format if qualified. At least one qualifying plugin must be delivered; do not jeopardize the contest entry if another format fails qualification. iPadOS remains future. Confirm AUv3 acceptance with Freqlab before counting it as the qualifying binary.
 
 | Week | Dates | Objective |
 | --- | --- | --- |
-| 1 | Nov 27–Dec 3 | Consolidation, licensing, AUv2 proof, AUv3 feasibility |
+| 1 | Nov 27–Dec 3 | Consolidation, licensing, AUv2/VST3 proof, AUv3 feasibility |
 | 2 | Dec 4–10 | Comparative DSP including Rings |
 | 3 | Dec 11–17 | Select voice architecture |
 | 4 | Dec 18–24 | Patching and WORLD |
@@ -37,10 +37,11 @@ Ambitious planning targets, not guarantees. Design exploration and wrapper work 
 - Consolidate PRs 3–6 on separate branch; preserve historical evidence and builds, isolate/backup settings. Compare STRIKE response times; preserve detune; distinguish intentional retune from device restart. Audition depth/static/navigation.
 - Complete MIDI, mouse, ROOM, device switch/unplug, permission revocation, sleep/wake, network loss and soak checks. ROOM helper packaging/signing/lifecycle, input selection and built-in microphone verification open.
 - Licensing: AGPL-3.0-only proposed; confirm JUCE route, complete delegated inventory verification, GPL/AGPL notices, Vult generated code provenance and reproducibility. Owner authorizes TALORA concepts; specific PlanMailbox reuse addressed in follow-up; no blanket publication of private implementation or third-party material.
-- AUv2 proof: share processor and UI with standalone, separate audio-device ownership, validate instrument/generator bus type and MIDI, instance isolation, transport, state restoration, offline rendering and helper permissions. No automatic microphone request at instantiation/restore.
+- AUv2/VST3 proof: share processor and UI with standalone, separate audio-device ownership, validate instrument/generator bus type and MIDI, instance isolation, transport, state restoration, offline rendering and helper permissions. No automatic microphone request at instantiation/restore.
+- **VST3 validation:** enable VST3 in the same JUCE CMake plugin target, verify pinned SDK/license and packaging. Qualify instrument/generator bus negotiation, MIDI events, automation, editor lifecycle, state, bypass, offline rendering, multiple instances and networking/ROOM behavior in a real VST3 host and pluginval; do not infer format parity from successful compilation or AU results. Sign/notarize distribution and verify a clean installation. No separate DSP fork.
 - **AUv3 spike:** JUCE supports AUv3 ([CMake API](https://github.com/juce-framework/JUCE/blob/master/docs/CMake%20API.md)); check exact pinned JUCE/Xcode generator and packaging requirements. AUv3 is an app extension, not a drop-in .component. Prototype a signed containing app + extension, Logic discovery/instantiation, network client entitlement for streaming/weather, sandbox/local phone access, resource loading and settings, multiple instances and extension lifecycle. ROOM cannot assume it can spawn a sibling helper; investigate containing-app-managed sensing and authorized IPC with explicit opt-in, no host microphone prompt. Keep radio decode/network off callback. Test actual extension host; compilation alone is not qualification. See [Apple AUv3 docs](https://developer.apple.com/documentation/audiotoolbox/audio-unit-v3-plug-ins). Use shared DSP/UI/service interfaces; no parallel DSP fork. iPadOS AUv3 is future work requiring a separate touch/mobile/network/performance and distribution qualification.
 
-**Exit:** consolidated playable baseline, remaining gaps explicit, credible conventional AU path. AUv3 feasibility result documented without blocking AUv2. Draft PRs until review.
+**Exit:** consolidated playable baseline, remaining gaps explicit, credible conventional AU and VST3 path. AUv3 feasibility result documented without blocking AUv2/VST3. Draft PRs until review.
 
 ## P1 — Sonic identity (Dec 17)
 
@@ -130,7 +131,7 @@ Illustrated creative experiments rather than dry parameter reference: quick star
 
 ## P7 — Release qualification (Jan 21–24)
 
-Public README with screenshots/video, manifesto, roadmap, field guide, architecture and transparent evidence/reuse disclosures. Complete license/notices/provenance, reproducible builds, signed/notarized conventional AU and standalone; AUv3/VST3 only if separately qualified. AUv3 containing app/extension packaging, entitlements, host discovery, multiple instances and IPC validation if included. Logic Pro, auval and applicable pluginval/host validation, clean-machine install, explicit supported architectures. Host transport, bypass, rates/buffers, state, offline bounce, helper permissions and lifecycle. Live broadcast cannot reproduce identically offline; define behavior. No hidden recording. Verify Freqlab build/upload and signing early.
+Public README with screenshots/video, manifesto, roadmap, field guide, architecture and transparent evidence/reuse disclosures. Complete license/notices/provenance, reproducible builds, signed/notarized conventional AU, VST3 and standalone, each qualified separately; AUv3 if separately qualified. AUv3 containing app/extension packaging, entitlements, host discovery, multiple instances and IPC validation if included. Logic Pro, auval, a VST3-capable DAW and applicable pluginval/host validation, clean-machine install, explicit supported architectures. Host transport, bypass, rates/buffers, state, offline bounce, helper permissions and lifecycle. Live broadcast cannot reproduce identically offline; define behavior. No hidden recording. Verify Freqlab build/upload and signing early.
 
 ## P8 — Three-minute performance film (Jan 24)
 
@@ -147,10 +148,10 @@ Fennesz-inspired intimate performance, not feature checklist. Show qualifying pl
 
 ## Scope and decision gates
 
-Essential: distinctive voice, live tuner/static/detune, semi-modular audio/CV, independent depth, ROOM, MIDI, polished original UI/display, safe feedback/recovery, configuration persistence, signed/notarized contest-eligible plugin, source and demo.
+Essential: distinctive voice, live tuner/static/detune, semi-modular audio/CV, independent depth, ROOM, MIDI, polished original UI/display, safe feedback/recovery, configuration persistence, signed/notarized contest-eligible plugin, planned macOS AUv2 and VST3 release formats, source and demo.
 
 High: tiny Tapestry-derived LOOP with volatile capture/chop/mangle, Rings early audition, selected Korupt/AFTERIMAGE/Wyrd/Drift candidates (not guaranteed inclusions), auxiliary mixer/feedback, follower/gate, SENSE, environmental hop, iPhone bridge, ATMOSPHERE, AUv3 feasibility and additional qualified macOS format.
 
-Stretch: second radio, custom phone companion, advanced spectral processing, general clock/trigger, VST3 if time. Post-contest: Windows, iPadOS/mobile AUv3, broader sensing, external SDR/pickups and hardware.
+Stretch: second radio, custom phone companion, advanced spectral processing, general clock/trigger. Post-contest: Windows, iPadOS/mobile AUv3, broader sensing, external SDR/pickups and hardware.
 
 Critical risks: unproven musical voice, licensing/provenance, plugin service lifecycle, complex interface, holidays and audition availability, broadcaster terms and signing/packaging. Keep work staged in draft PRs. Review at each listening gate; no unsupported pass, no merge/release without approval. Roadmap is living planning direction, not a claim of finished capabilities.
