@@ -1,8 +1,13 @@
 # WILDBAND — Plan D: comparative voice research (plan only, nothing integrated)
 
 **Status:** research plan. No candidate code has been copied, ported or built. Sources: `OWNER-FIRST-AUDITION.md`
-§D, the manifesto, the reuse studies on the docs branch, issue #2, and a read of the candidates' actual source on
-2026-11-27 (paths below). "Read" means the files were opened; no candidate's tests were run.
+§D, the manifesto, the reuse studies on the docs branch, issue #2, and a survey of the candidates' actual source on
+2026-11-27 (paths below). **How much of this is checked:** the survey was done by a delegated read-only pass. I then
+re-checked these myself against the files: both repositories are public; `vcv-tapestry`'s licence text (GPL v3) and
+`plugin.json` ("GPL-3.0-or-later"); the Rack includes and `rack::math` calls in `korupt-dsp.h`; the file lengths;
+Wyrd's feedback-gain line; AFTERIMAGE's SPDX header and the failed-gate text and figures in its P1-B qualification.
+Everything else in the table (primitive boundaries, state sizes, per-sample operation counts, Drift's details) is
+from the survey and **not independently verified**. No candidate's tests were run.
 
 ## Why
 
@@ -21,7 +26,7 @@ what gesture, character or world-to-sound relationship does it add? "It already 
 | Smallest primitive with the character | `KoruptInputStage::process` + `KoruptDSP::process`; about 15 one-pole states, no buffers | `generateGrains` / `admitGrains` / `renderVoice`, private members of one `Engine`, reading a **frozen captured slot**, not a rolling history | `TimeFilterExperiment`: delay with allpasses and saturation; about 4.2 MB of delay memory allocated in its constructor | `DriftCoreProcessor::process`; about 20 floats |
 | Known cost | None measured. About 5 `tanh` + 1 `pow` per sample by inspection | Measured: about 90–100 µs per 32-sample callback at 96 kHz | None measured. 5 cubic reads, 3 `tanh`, 5 `exp` per sample by inspection | None measured; runs per sample with several `exp`/`sin` |
 | Open or failed gates | None documented | **Real-time gate NOT MET** in its own qualification: 96 kHz / 32 at p99.9 26.7–27.5 % against a 25 % limit, identical code failing 2 of 3 runs, cause unexplained; xrun instrument failed its control; hosts and listening not assessed | None documented; its guards "do not qualify it for arbitrary live network-driven feedback graphs" (reuse study) | None documented |
-| Notable in the code | Naive (non-band-limited) square VCO behind fixed low-passes: aliasing is part of the sound and will change with sample rate | Built around capture; the docs propose a *new* rolling variant, i.e. mostly new code | Loop gain can exceed 1 (`0.05 + 1.08·smoothstep`), held by a `tanh` at ±1.2 | Name clash: WILDBAND already has a DRIFT knob and input |
+| Notable in the code | Naive (non-band-limited) square VCO behind fixed low-passes: aliasing is part of the sound and will change with sample rate | Built around capture; the docs propose a *new* rolling variant, i.e. mostly new code | A loop-gain term reaches 1.13 (`0.05 + 1.08·smoothstep`, line 680) before a further `persistence` factor; the survey reports a `tanh` at ±1.2 on the write | Name clash: WILDBAND already has a DRIFT knob and input |
 
 Not established: authorship and contributor rights for any of these repositories; whether their tests pass today;
 any CPU cost for Korupt, Wyrd or Drift.
