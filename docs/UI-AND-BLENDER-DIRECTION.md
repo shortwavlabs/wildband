@@ -2,6 +2,8 @@
 
 **Status:** early art/interaction brief, not an approved mockup.
 
+See the [Instrument Design & Experience Manifesto](INSTRUMENT-DESIGN-MANIFESTO.md) for the overarching owner direction: one integrated, self-standing instrument with a compelling normalled path, progressive discovery, vintage radio character and an original playful display. Candidate panel sections are exploratory, not fixed geometry or a commitment to a rack of independent modules.
+
 ## Goal
 
 Create the *desire to touch* that the user associates with Teenage Engineering, Make Noise and experimental electronic instruments, but translate it into a practical computer instrument. Avoid making a beautiful static faceplate that forces menu-diving or obscures interaction.
