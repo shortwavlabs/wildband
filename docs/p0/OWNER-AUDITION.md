@@ -3,7 +3,7 @@
 Everything is in **one build**. Monitors down first; nobody has heard any of this.
 
 ```bash
-open /Users/shortwavlabs/Workspace/shortwavlabs/wildband-integration/build/WILDBAND_artefacts/Release/WILDBAND.app
+open auditions/p1-lab/WILDBAND.app        # from the repository root
 ```
 
 This binary is built from the top of the stack: branch `p1/plugin-proof` (#15), which contains the integration
@@ -14,13 +14,13 @@ licence and third-party notices in `Contents/Resources`.
 It keeps its own settings (`WILDBAND-integration.settings`, started as a copy of your existing setup) and never
 writes the file the four older builds share. **LAB choices are remembered between launches**; while either is not at
 its default the status line says so ("LAB voice: …", "LAB strike: …"). With **LAB** left alone it is the integration candidate: your P0
-instrument plus per-cable DEPTH, the STRIKE correction and the tuner. The four older builds are still where they
-were. ROOM will ask for the microphone once more (the helper was rebuilt).
+instrument plus per-cable DEPTH, the STRIKE correction and the tuner. The four older builds are in `auditions/p0-*`
+(see `OWNER-CHECKLIST.md`). ROOM will ask for the microphone once more (the helper was rebuilt).
 
 For a comparison you do not want to keep, use a throwaway profile:
 
 ```bash
-open /Users/shortwavlabs/Workspace/shortwavlabs/wildband-integration/build/WILDBAND_artefacts/Release/WILDBAND.app --args --profile=scratch
+open auditions/p1-lab/WILDBAND.app --args --profile=scratch
 ```
 
 ## 1. The consolidated instrument (15 minutes)
@@ -57,7 +57,7 @@ behaviour. None of them has a knob, on purpose.
 | Fast, slow and failed connections | Real stations are fast. For repeatable slow and failed ones, run the test server and SET the addresses below. **SET replaces the station in the current slot and there are no spare slots, so do this in the `scratch` profile** (command above), which leaves your stations alone |
 
 ```bash
-cd /Users/shortwavlabs/Workspace/shortwavlabs/wildband-integration && ffmpeg -v error -y -f lavfi -i "sine=frequency=330:duration=20" -ac 2 -ar 44100 -b:a 128k build/tone.mp3 && python3 -I tools/stream_test_server.py build/tone.mp3
+ffmpeg -v error -y -f lavfi -i "sine=frequency=330:duration=20" -ac 2 -ar 44100 -b:a 128k build/tone.mp3 && python3 -I tools/stream_test_server.py build/tone.mp3   # from the repository root
 ```
 
 `http://127.0.0.1:8765/wait/3` (three seconds to arrive), `http://127.0.0.1:8765/wait/7` (longer than the static
@@ -88,21 +88,27 @@ Question: is any of the three more expressive than the current resonator — eno
 Level-matched files for every candidate, including the ones that are not in the instrument (Korupt, Wyrd, Drift):
 
 ```bash
-open /Users/shortwavlabs/Workspace/shortwavlabs/wildband-integration/build/voice-lab
+open auditions/p1-lab/voice-lab
 ```
 
 Sort by name: `music__dry`, `music__reference`, `music__resonator`, `music__dissolve`, `music__korupt`,
 `music__wyrd-timefilter`, each with `world-off` and `world-on`. The fixtures are synthetic (a formant voice,
 drums, a chord sequence, tuner static, silence, a sine); the "world" in these files is a scripted stand-in, not a
-room. **Treat the Korupt files with suspicion**: the harness may be driving it wrongly (see `VOICE-RESEARCH.md`).
+room. The Korupt files are in the `korupt-unverified/` subfolder. **Treat them with suspicion**: the harness may be driving it wrongly (see `VOICE-RESEARCH.md`).
 
 ## 6. The plugin, in Logic and Live (first time in a real host)
 
-The AU is installed for your user (`~/Library/Audio/Plug-Ins/Components/WILDBAND.component`, ad-hoc signed, passes
-`auval`). The VST3 is not installed; copy it if you want to try it in Live:
+This build's AU and VST3 are kept in `auditions/p1-lab/plugin/` (ad-hoc signed; the AU passes `auval`). **The AU
+now installed for your user is a later build** (#19, explicit RECEIVE: it connects to a station only after RECEIVE
+is pressed in its temporary panel). To hear this build in a host, install its AU in place of that one, and copy the
+VST3 if you want to try it in Live:
 
 ```bash
-cp -R /Users/shortwavlabs/Workspace/shortwavlabs/wildband-integration/build/WILDBAND_Plugin_artefacts/Release/VST3/WILDBAND.vst3 ~/Library/Audio/Plug-Ins/VST3/
+rm -rf ~/Library/Audio/Plug-Ins/Components/WILDBAND.component && cp -R auditions/p1-lab/plugin/WILDBAND.component ~/Library/Audio/Plug-Ins/Components/
+```
+
+```bash
+cp -R auditions/p1-lab/plugin/WILDBAND.vst3 ~/Library/Audio/Plug-Ins/VST3/
 ```
 
 It is an instrument (Logic: *Software Instrument → AU Instruments → Shortwav Labs → WILDBAND*). There is no WILDBAND
