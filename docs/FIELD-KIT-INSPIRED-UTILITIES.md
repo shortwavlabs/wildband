@@ -38,13 +38,13 @@ WILDBAND uses live radio and local/remote environment signals to drive performan
 
 **Why:** helps subtle real-world changes become performable without granting outside signals uncontrolled authority.
 
-### 4. Minimal patchable LFO — later
+### 4. Drift-derived organic random modulation — later
 
-**Reference concept:** simple periodic modulation (square/triangle and blending).
+**Reference concepts:** Field Kit's simple modulation, complemented by Shortwav Labs' own [Drift VCV module](https://github.com/shortwavlabs/vcv-tapestry/blob/main/src/dsp/drif-dsp.h).
 
-**WILDBAND concept:** one light-weight LFO with clearly meaningful rate/depth and phase behavior. Allow audio/environment envelopes to modulate LFO rate/depth. No sequencer, large preset suite or elaborate modulation matrix required.
+**WILDBAND concept:** reuse or port Drift as an organic, patchable random-CV generator rather than inventing a generic LFO first. The existing implementation has SPEED, RANGE, OFFSET and a signed MIX control for optional external CV; the Vult-generated engine produces interpolated random segments, slower interference, jitter and occasional glitch excursions. It exposes raw RANDOM, input-blended MIXED, final OUTPUT and ACTIVITY values. Offer a bounded, well-labeled CV port for each musically useful signal and allow radio-derived, room-derived or MIDI-controlled input to influence the MIX path. Evaluate whether a basic periodic LFO is still needed separately.
 
-**Why:** creates controllable motion in partnership with unpredictable external signals.
+**Why:** produces shaped, imperfect movement from a Shortwav Labs processor with a distinctive existing sound-control identity; it complements rather than duplicates deterministic live radio/environment inputs.
 
 ## Future hardware-facing investigations (not P0)
 
@@ -52,6 +52,20 @@ WILDBAND uses live radio and local/remote environment signals to drive performan
 - **Motors/solenoids/physical actuators:** only with explicitly supported external hardware and bounded outputs, likely MIDI or dedicated protocol; not a laptop-only requirement.
 - **Second live radio:** separate from Field Kit utilities but especially useful for cross-modulation and auxiliary sends after core playback and routing are solid.
 - **Korupt integration:** see [WILDBAND Issue #2](https://github.com/shortwavlabs/wildband/issues/2) for independent CMOS/PLL port feasibility and audio/CV output proposals.
+
+## Drift port research note (not part of P0)
+
+**Verified source files:**
+- [src/dsp/drif-dsp.h](https://github.com/shortwavlabs/vcv-tapestry/blob/main/src/dsp/drif-dsp.h) — wrapper, CV ranges, inputs/outputs, numerical guards
+- [src/dsp/generated/drift_core.h](https://github.com/shortwavlabs/vcv-tapestry/blob/main/src/dsp/generated/drift_core.h) and [drift_core.cpp](https://github.com/shortwavlabs/vcv-tapestry/blob/main/src/dsp/generated/drift_core.cpp) — Vult-generated algorithm and state
+- [src/tests/test_drift.cpp](https://github.com/shortwavlabs/vcv-tapestry/blob/main/src/tests/test_drift.cpp) — original validation cases
+- [LICENSE.md](https://github.com/shortwavlabs/vcv-tapestry/blob/main/LICENSE.md) — repository GPLv3 text; review authorship, Vult-generated artifacts and relevant license obligations before reuse
+
+**Current behavior, grounded in source:** `Controls { offset=0.5, speed=0.38, range=0.72, mix=0 }`; optional normalized input (`inputVolts / 5`); outputs `randomVolts` bounded ±6.25 V, `mixedVolts` ±7 V, final `outputVolts` ±10 V and `activity` in [0,1]. The core advances smoothly between pseudo-random targets with bending, jitter, interference and occasional jumps. Its internal seed is initialized to a fixed value, so **do not claim true physical randomness**: variations in control/input/processing history affect trajectory, but its algorithm is fundamentally pseudo-random and stateful. Typical speed mapping spans roughly 0.01–6 Hz, as calculated from the generated formula.
+
+**Port and qualification tasks:** ensure all generated Vult support headers/source/tables are accounted for; assess authorship/license compatibility; implement a rack-independent JUCE-compatible core; compare output vectors against the VCV reference using fixed inputs and timings; test reset, sample rate, NaN control, smoothing, CPU cost, CV scaling, negative MIX polarity, no-input behavior, and parameter changes. Make it an optional **CV-only utility** initially (not an audio oscillator), with one-to-many TALORA-style fan-out to resonator damping, Korupt rate, coupling, tuner motion or safe feedback gain. All destinations require clamping/smoothing and relevant rate handling. Hardware MIDI mapping should allow live control over SPEED/RANGE/MIX without forcing visual attention.
+
+**Musical audition:** compare (a) fixed controls, (b) basic sine/triangle LFO and (c) Drift-driven motion on live broadcast sources. The question is whether Drift makes a more interesting and intentionally playable evolving instrument, not merely whether random movement is audible.
 
 ## Patch recipes instead of fixed musical outcomes
 
@@ -79,5 +93,5 @@ If configuration persistence is later added, save topology, parameter values, se
 
 1. Finish and audition the P0 radio + resonator + room + MIDI + patching path.
 2. Try one auxiliary/feedback routing experiment and one improved follower/gate experiment. Report each separately, with owner feedback.
-3. Only then choose whether SENSE, the LFO, Korupt, or additional physical inputs offer the most musical value.
+3. Only then choose whether SENSE, a Drift-derived random modulator, Korupt, a separate simple LFO, or additional physical inputs offer the most musical value.
 4. Keep the optional future "50 ways to play" recipe collection as documentation, not a release requirement.
