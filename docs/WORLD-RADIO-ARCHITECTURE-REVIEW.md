@@ -27,16 +27,16 @@ Facts below were read from the code on `p1/plugin-lifecycle`.
 | Engine radio features | One follower pair (`rFast`, `rSlow`), one tuner-static source, one `gap` / `request` / off-centre `detune` in `Controls` | Duplicate per receiver: followers, static layer (with its own 8 s limit and PANIC mute), detune. Static must follow **each** receiver's real gap | Low |
 | Patch ports | `radio.audio_out`, `radio.level_out`, `radio.activity_out` (+ `local.audio_out`); `RoutingPlan` holds 7 inputs; one cable per input | Add `radioB.audio_out`, `radioB.level_out`, `radioB.activity_out` (new stable IDs; existing ones keep meaning "A", so saved patches stay valid). Feeding A **and** B into one resonator input needs the P2 mixer/fan-in; until then A and B reach different inputs or a mixer node | Medium (UI and routing scope) |
 | Plugin parameters | Ten host parameters; AU hosted order frozen | TUNE B, STATIC B, B enable, A/B mix: **version hint 2** so they sort after the frozen ten (Logic addresses AU parameters by index) | Low, if the rule is followed |
-| Plugin lifecycle | One `ReceiverGate` decides when the receiver may touch the network (PR #17) | One gate for both receivers: B never connects before the gate is ACTIVE; suspension and release cancel both | Low |
+| Plugin lifecycle | PR #17 inferred intent from 1.5 s of real-time rendering. **Superseded by the owner's decision: an explicit RECEIVE control authorises the network** (PR #19); host activity only decides whether an authorised receiver may hold its connection right now | **One RECEIVE per receiver (RECEIVE A, RECEIVE B)**, each off by default, runtime-only (never restored from a preset or project), revoked by RECEIVE off, restore, destruction and PANIC. Host suspension releases both connections but keeps each receiver's intent; resume reconnects only receivers that were explicitly activated in this instance | Low — the contract is written for N receivers |
 | Saved state | Standalone stores six station URLs; the plugin stores only its ten parameters | Plugin state v2: the six-slot set (`StationRef`s), A/B slot selections, B enabled. Restoring never connects (already enforced by the gate). v1 state migrates with B off | Low |
-| Catalog requests | None | A separate, cancellable directory service, used **only on explicit user action in an editor**. The plugin has no editor yet, so the catalog depends on the shared editor work. Catalog browsing never starts audio (requirement 5) | Medium (schedule) |
+| Catalog requests | None | A separate, cancellable directory service, used **only on explicit user action in an editor** (browsing and searching are not RECEIVE: they never start audio, and they need no receiver authorisation; a selected station plays only once its receiver's RECEIVE is on). The plugin has no editor yet, so the catalog depends on the shared editor work. Catalog browsing never starts audio (requirement 5) | Medium (schedule) |
 | Local / private URLs | The test aid `WILDBAND_TEST_STATIONS` and the local test server use `127.0.0.1` | PR #12 asks to block loopback/private addresses for directory entries. Keep that rule for catalog-sourced entries only; manual and test URLs stay possible with explicit intent, otherwise the qualification tools stop working | Low |
 | Cleartext `http://` | Allowed by the standalone's Info.plist; unknown inside hosts | Catalog results will contain many `http://` streams. Measure in Logic/Live before promising them | Medium |
 
 **Recommended order:** ~~fix the playlist double socket~~ (done in PR #17) → size the ring from the rate (useful even
 with one receiver) → session budget + server-counted tests → second receiver in `Instrument`/`Engine`
-behind B-disabled-by-default with A-only parity tests → new ports/parameters → set model in state → catalog service
-once an editor exists.
+behind B-disabled-by-default (RECEIVE B off) with A-only parity tests → new ports/parameters (RECEIVE A/B are runtime
+controls, not host parameters) → set model in state → catalog service once an editor exists.
 
 ## 2. Radio Browser feasibility plan (spike R0 — small, read-only)
 
@@ -83,6 +83,12 @@ saved sets still playable.
 A short report (counts, shares, timings, failure classes, mirror behaviour, observed field problems), the exact
 queries and timestamps, and a recommendation for the adapter's filters and validation. Estimated effort: about half
 a day including the probe. Owner decision before any catalog UI or dual-receiver code.
+
+### Safe URL handling during the spike
+
+Every `url_resolved` is treated as untrusted: `http`/`https` only, no embedded credentials, redirects and playlist
+depth capped as in the receiver, and loopback, private, link-local and metadata addresses refused (also after
+redirects). The spike never follows `homepage` or `favicon` links.
 
 ### Constraints carried over
 
