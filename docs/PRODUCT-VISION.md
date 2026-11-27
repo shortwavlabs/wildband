@@ -39,7 +39,7 @@ Distinctly Shortwav Labs; official orange **#F59E0B**. A Blender-authored physic
 
 - The primary product is an **instrument**, not an audio recording or productivity application.
 - No built-in record, capture, rip, render or sample-library workflow in historical P0. Post-P0, the owner approved [LOOP](TAPESTRY-LOOPER-RESEARCH.md): short explicitly captured, RAM-only fragments for live manipulation; no saved audio, full-performance recording, sample library or export.
-- Standalone macOS first. AU/VST3 and Windows are optional decisions after P0.
+- Standalone macOS first for P0. The agreed roadmap targets macOS standalone, AUv2 and VST3 for release; macOS AUv3 is a feasibility/qualification target, Windows and iPadOS future.
 - External sensors must be opt-in; the instrument remains useful if all are unavailable.
 - Wi-Fi/Bluetooth metadata is *not* general RF field sensing; raw spectrum requires external hardware.
 - Playability matters more than whether the music can literally never repeat.
