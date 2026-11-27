@@ -66,3 +66,47 @@ Out of scope here: the shared editor, ROOM in a plugin, signing and notarization
 Explicitly **not** established by this proof, whatever the result: behaviour in Logic Pro or Live (instantiation,
 streaming under the host's network policy, automation, bypass, multiple instances, offline bounce, project
 save/reload), VST3 conformance (no validator is installed here), signing, notarization, clean-machine install.
+
+---
+
+## Results (added after implementation, 2026-11-27)
+
+**What was built and what a validator or the headless check established. Nothing was tried in a DAW.**
+
+| ID | Result | Notes |
+|---|---|---|
+| PA-01 | **Pass** | `src/Instrument.h` extracted from `Main.cpp` with two host helpers added (`prepareForHost`, `renderForHost`); the standalone builds, `wildband_tests` 884 checks and `wildband_tuner_check` pass as before |
+| PA-02 | **Pass** | One `juce_add_plugin` target produces `WILDBAND.component` (AU v2) and `WILDBAND.vst3` from `src/Plugin.cpp` + the shared sources; ad-hoc signatures verify. **Found on the way:** my post-build copy of the licence files failed on the AU (no `Resources` folder yet) and made the build delete the binary; fixed |
+| PA-03 | **Pass** | `auval -v aumu Wldb SwLb`: **AU VALIDATION SUCCEEDED** ([`evidence/auval.txt`](evidence/auval.txt)). Installed for this user only (`~/Library/Audio/Plug-Ins/Components`) to run it |
+| PA-04 | **Pass** | Both formats: 0 audio inputs, 2 outputs, accepts MIDI, described as an instrument, the ten parameters. VST3 also has a bypass parameter and 2 080 hidden parameters that JUCE uses to carry MIDI CCs (VST3 has no CC events) — that is what lets MIDI learn work in a VST3 host |
+| PA-05 | **Pass** | The plugin bundle declares no microphone use, its binary references no capture API (`AVCaptureDevice`, `requestAccessForMediaType`: 0 hits), and no system prompt appeared while validating and loading it |
+| PA-06 | **Pass** | `wildband_plugin_check` loads the built bundles through JUCE's hosting code ([`evidence/plugin-check.txt`](evidence/plugin-check.txt), 24 checks). Six seconds in real time: sound while the station connects (static) and from the broadcast, under the ceiling. Faster than real time at 44.1/48/96 kHz with automation and MIDI: finite and bounded (mostly silent — no audio can arrive faster than real time; see "Offline bounce"). State round-trips into a second instance; about 500 bytes as stored by each host format |
+| PA-07 | **Pass** | VST3 SDK (MIT) and AudioUnitSDK (Apache-2.0) added to the notices and `licenses/`; the bundles carry the licence files |
+
+**Two real defects found by the headless check and fixed:**
+
+1. **Saved state could miss the latest change.** The plugin wrote its state from the engine's values, which are only
+   updated in `processBlock`. A host that saves after automating without having processed a block in between
+   (stopped transport, suspended plugin) would have saved stale values. State is now written from the host
+   parameters, and knob moves made through MIDI learn are mirrored into the host parameters on the message thread
+   (unless the host moved that parameter itself in the meantime).
+2. **AU parameter order is not declaration order.** JUCE's AU wrapper sorts parameters by hashed ID, and Logic
+   addresses AU parameters by that index. The hosted order —
+   `MIX, TONE, TUNE, DRIFT, LEVEL, PITCH, SHAPE, COUPLE, STATIC, FEEDBACK` — is now frozen by the check; any
+   parameter added later must carry version hint 2 or higher so that it lands after these.
+
+### Still open, in the order they matter for the contest
+
+1. **Logic Pro and Live**: instantiate, play, automate, save and reload a project, bypass, two instances, offline
+   bounce. Owner or a scripted session; nothing here says it works.
+2. **Plain-`http://` stations inside a host** (the host's App Transport Security applies, not ours). Untested.
+3. **A shared editor**: the plugin has no UI of its own yet (hosts show a generic slider panel). The next step is to
+   lift `MainComponent` minus device ownership into `src/Editor.*`.
+4. **ROOM in a plugin**: not attempted; the helper must be found from the plugin bundle, and sandboxed hosts may
+   refuse to launch it.
+5. **VST3 conformance**: no validator is installed (`pluginval` and Steinberg's validator absent).
+6. **Signing, notarization, installer**: not started; needs the owner's Developer ID.
+7. **Offline bounce of a live broadcast** cannot reproduce anything; it renders whatever has arrived. To be
+   documented in the field guide and the host behaviour defined (most likely: plays the ring's contents, then
+   static/silence).
+8. AUv3: separate spike, not started.
