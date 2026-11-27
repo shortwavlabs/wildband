@@ -45,6 +45,12 @@ silently changed what the next one started with. From this branch on:
 open /Users/shortwavlabs/Workspace/shortwavlabs/wildband-integration/build/WILDBAND_artefacts/Release/WILDBAND.app --args --profile=compare-a
 ```
 
+**Which binary is at that path.** One worktree holds the whole stack, so the build directory contains whichever
+branch was built last. The qualification on this page was done at this branch's head (`p0/integration`, commit
+`4d03a69`). The binary handed to the owner is built from the top of the stack (`p0/voice-lab`), which with LAB left
+alone behaves as this candidate plus the tuner restart fix; its own measurements are in `OWNER-AUDITION.md`. To get
+exactly this candidate, check out `p0/integration` and rebuild.
+
 - The profile in use is shown in the tooltip of the WILDBAND title.
 - To start a profile afresh, delete its file. To back up or restore, copy the file; it is plain XML:
 

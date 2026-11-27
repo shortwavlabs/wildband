@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "Dissolve.h"
 #include "Patch.h"
 
 namespace wildband
@@ -209,6 +210,7 @@ struct Controls
     float detune = 0.0f;   // Dial::offCentre
     float gap = 0.0f;      // Radio::tuneGap: 0 = the station is playing, 1 = the receiver is fetching the one just asked for
     int request = 0;       // Radio::request: changes with every station request, so each one gets its own static
+    int voice = 0;            // LAB comparison (docs/p0/VOICE-RESEARCH.md): 0 = Resonator (the instrument), 1 = Dissolve, 2 = Dissolve -> Resonator
     int strikeResponse = 0;   // LAB comparison (docs/p0/STRIKE-RESPONSE.md): 0 = Held (the existing behaviour), 1 = Fast, 2 = Organic
     EnvFrame room;         // EnvBus::read
     RoutingPlan plan = RoutingPlan::fromGraph (Graph::defaultPatch());
@@ -232,6 +234,7 @@ public:
         aParam = onePoleCoeff (0.015, fs); aFreq = onePoleCoeff (0.025, fs); aMode = onePoleCoeff (0.03, fs);
         aMod = onePoleCoeff (0.02, fs / kControlInterval);
         tunerStatic.prepare (fs);
+        dissolve.prepare (fs);
         gapSeconds = 0.0f;
         staticMuted = false;
         strikeRelease = (float) std::exp (-1.0 / (2.0 * fs / kControlInterval));
@@ -256,6 +259,8 @@ public:
     void reset() noexcept
     {
         staticGain = 0.0f;
+        dissolve.reset();
+        dissolveHeard = false;
         for (auto& l : lines) std::fill (l.begin(), l.end(), 0.0f);
         for (auto& d : refDelay) std::fill (d.begin(), d.end(), 0.0f);
         lp = {}; dc = {}; svfA = {}; svfB = {}; refLp = {};
@@ -270,6 +275,13 @@ public:
     void process (const float* radioL, const float* radioR, const float* local, float* outL, float* outR, int n, const Controls& c) noexcept
     {
         if (first) { snapControls (c); first = false; }
+
+        // LAB voice housekeeping. Dissolve's history is temporary: once the voice is deselected and has faded out, what
+        // it heard is erased (in pieces, so no single callback pays for it), and it can never be replayed later.
+        const bool labOn = c.voice == 1 || c.voice == 2;
+        if (! labOn && voiceW[1] <= 1.0e-4f && voiceW[2] <= 1.0e-4f) { if (dissolveHeard) dissolveHeard = ! dissolve.forgetSome (16384); }
+        else if (labOn && dissolveHeard && voiceW[1] <= 1.0e-4f && voiceW[2] <= 1.0e-4f && ! dissolveRunning) { dissolve.reset(); }   // re-selected mid-erase: finish at once
+        dissolveRunning = labOn || voiceW[1] > 1.0e-4f || voiceW[2] > 1.0e-4f;
         bool bad = false;
         float peak = 0.0f;
 
@@ -302,6 +314,24 @@ public:
             xl = srcW[0] * xl + srcW[1] * loc;
             xr = srcW[0] * xr + srcW[1] * loc;
 
+            // ---- LAB voice experiment: Dissolve, a rolling granular delay on the same excitation. With the resonator
+            // selected (voice 0) none of this runs and every sample below is exactly what it was.
+            const bool lab = dissolveRunning;
+            float dl = 0.0f, dr = 0.0f, exL = xl, exR = xr;
+            if (lab)
+            {
+                dissolveHeard = true;
+                dissolveNow.dissolve += aParam * (dissolveP.dissolve - dissolveNow.dissolve);      // smoothed like every other control
+                dissolveNow.spray += aParam * (dissolveP.spray - dissolveNow.spray);
+                dissolveNow.regen += aParam * (dissolveP.regen - dissolveNow.regen);
+                dissolveNow.drive += aParam * (dissolveP.drive - dissolveNow.drive);
+                dissolveNow.time = dissolveP.time;                                                 // (glides inside Dissolve)
+                dissolveNow.damp = damp;
+                dissolve.process (xl, xr, dl, dr, dissolveNow);
+                exL = xl + voiceW[2] * (dl - xl);                          // voice 2: the grains, not the radio, excite the resonators
+                exR = xr + voiceW[2] * (dr - xr);
+            }
+
             // ---- resonators
             std::array<float, kLines> v;
             float sum = 0.0f;
@@ -321,11 +351,16 @@ public:
                 const auto k = (size_t) i;
                 // coupling matrix I - couple * (2/N) * ones: eigenvalues 1 and 1 - 2*couple, so it never adds energy
                 const float mixed = v[k] - couple * (2.0f / kLines) * sum;
-                lines[k][(size_t) w] = ((i & 1) ? xr : xl) * excite + std::tanh (gain * mixed);
+                lines[k][(size_t) w] = ((i & 1) ? exR : exL) * excite + std::tanh (gain * mixed);
                 ((i & 1) ? wetR : wetL) += v[k];
             }
             w = (w + 1) & (lineSize - 1);
             wetL *= wetGain; wetR *= wetGain;
+            if (lab)                                                         // voice 1: Dissolve alone takes the resonators' place
+            {
+                wetL = (1.0f - voiceW[1]) * wetL + voiceW[1] * dl;
+                wetR = (1.0f - voiceW[1]) * wetR + voiceW[1] * dr;
+            }
 
             // ---- reference chain: an ordinary resonant filter into a feedback delay, for A/B listening
             float refL = 0.0f, refR = 0.0f;
@@ -374,7 +409,8 @@ public:
     }
 
     float lineFrequency (int i) const noexcept { return freq[(size_t) i]; }
-    float strikeBackoff() const noexcept { return strikePlugged; }     // 0..1: how far the steady excitation is backed off (tests, LAB)
+    float strikeBackoff() const noexcept { return strikePlugged; }
+    size_t dissolveMemoryBytes() const noexcept { return dissolve.memoryBytes(); }     // 0..1: how far the steady excitation is backed off (tests, LAB)
     std::atomic<int> faults { 0 };
     std::atomic<float> meterRadioLevel { 0 }, meterRadioActivity { 0 }, meterOut { 0 }, meterStatic { 0 };
 
@@ -505,7 +541,17 @@ private:
         const float strike = cpl * strikePlugged;
         exciteT = std::max (0.0f, 0.5f * ((1.0f - 0.7f * strike) + 5.0f * cpl * cvIn (kResExciteIn)));
         const float g2 = gainT * gainT;
-        wetGainT = 1.0f / (1.0f + 2.0f * g2 * g2 * g2);                                  // keeps loudness roughly level as the loop closes
+        wetGainT = 1.0f / (1.0f + 2.0f * g2 * g2 * g2);
+
+        // ---- LAB voice: Dissolve borrows the panel. TIME <- PITCH (higher = shorter), DISSOLVE <- SHAPE, SPRAY <- DRIFT,
+        // regeneration <- FEEDBACK, damping <- TONE, and the same six control inputs under the same names.
+        for (int m = 1; m < 3; ++m) voiceT[m] = c.voice == m ? 1.0f : 0.0f;
+        dissolveP.time = 1.6f * std::exp2 (-5.7f * pt[kPitch] - cpl * cvIn (kResPitchIn));
+        dissolveP.dissolve = clamp01 (pt[kShape] + 0.5f * cpl * cvIn (kResShapeIn));
+        dissolveP.spray = clamp01 (drift + 0.5f * cpl * cvIn (kResDriftIn));
+        dissolveP.regen = 0.95f * pt[kFeedback] + 0.3f * cpl * cvIn (kResFeedbackIn);
+        dissolveP.damp = dampT;
+        dissolveP.drive = std::min (3.0f, 2.0f * exciteT);                                  // keeps loudness roughly level as the loop closes
     }
 
     void smooth() noexcept
@@ -516,6 +562,7 @@ private:
         for (int m = 0; m < 2; ++m) srcW[m] += aMode * (srcT[m] - srcW[m]);
         detune += aParam * (detuneT - detune);
         staticGain += aParam * (staticT - staticGain);
+        for (int m = 1; m < 3; ++m) voiceW[m] += aMode * (voiceT[m] - voiceW[m]);
         damp += aParam * (dampT - damp);
         gain += aParam * (gainT - gain);
         couple += aParam * (coupleT - couple);
@@ -546,6 +593,10 @@ private:
     float ringPhase = 0, refLfo = 0, rFast = 0, rSlow = 0;
     std::array<float, kNumInputs> mod {};   // smoothed value at each resonator input (index 0, the audio input, unused)
     StaticSource tunerStatic;
+    Dissolve dissolve;
+    Dissolve::Params dissolveP, dissolveNow;
+    bool dissolveHeard = false, dissolveRunning = false;
+    float voiceW[3] = {}, voiceT[3] = {};
     float staticGain = 0, staticT = 0, gapSeconds = 0;
     int lastRequest = 0;
     bool staticMuted = false;

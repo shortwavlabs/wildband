@@ -125,6 +125,7 @@ void testBounded()
             c.detune = u (rng);
             c.gap = trial % 3 == 0 ? 0.0f : u (rng) * 2.0f;                          // CT-11: tuner static in the hostile runs
             c.strikeResponse = trial % 5 == 4 ? 99 : trial % 3;                      // SR-06: every response (and a nonsense value)
+            c.voice = trial % 7 == 6 ? 42 : (trial / 2) % 3;                         // DV-03: every LAB voice (and a nonsense value)
             c.room = { u (rng) * 3.0f, u (rng) * 3.0f, u (rng) * 3.0f };             // out-of-range room values too
             if (trial % 4 == 3) c.plan = garbagePlan (rng);                          // garbage plans too
             else if (trial % 4 == 1)                                                // AT-08: every destination at -1 or +1
@@ -432,6 +433,7 @@ void testNoAllocation()
         c.p[b % kNumParams] = (float) (b % 17) / 16.0f;
         c.gap = (b / 400) % 2 ? 1.0f : 0.0f;                                         // CT-11: static starting and stopping
         c.strikeResponse = (b / 250) % 3;                                            // SR-06
+        c.voice = (b / 700) % 3;                                                     // DV-03
         c.mode = (Mode) ((b / 500) % 3);
         bus.publish (kEnvMicrophone, room.process (x.data(), 64), b);
         c.room = bus.read (b);
@@ -1310,6 +1312,160 @@ void report()
 }
 } // namespace strike
 
+
+// =====================================================================================================================
+// Voice experiment D2, Dissolve: docs/p0/VOICE-RESEARCH.md
+namespace voice
+{
+void all()
+{
+    const double fs = 48000.0;
+    currentTest = "DV-01 silence in, silence out; deterministic";
+    {
+        Dissolve a, b;
+        a.prepare (fs); b.prepare (fs);
+        Dissolve::Params p;
+        p.dissolve = 1.0f; p.spray = 1.0f; p.regen = 0.95f;
+        float l, r, peakOut = 0;
+        for (int i = 0; i < 48000; ++i) { a.process (0.0f, 0.0f, l, r, p); peakOut = std::max (peakOut, std::max (std::abs (l), std::abs (r))); }
+        CHECK (peakOut == 0.0f);
+        const auto x = noise (48000 * 2, 0.4f);
+        bool identical = true;
+        for (auto v : x) { float l2, r2; a.process (v, -v, l, r, p); b.process (0.0f, 0.0f, l2, r2, p); (void) l2; (void) r2; }
+        a.reset(); b.reset();
+        for (auto v : x) { float l2, r2; a.process (v, -v, l, r, p); b.process (v, -v, l2, r2, p); identical = identical && l == l2 && r == r2; }
+        CHECK (identical);
+    }
+    currentTest = "DV-02 with nothing dissolved it is a plain delay";
+    {
+        Dissolve d;
+        d.prepare (fs);
+        Dissolve::Params p;
+        p.time = 0.25f; p.dissolve = 0.0f; p.spray = 0.0f; p.regen = 0.0f;
+        int at = -1, count = 0;
+        float l, r;
+        for (int i = 0; i < 48000; ++i)
+        {
+            d.process (i == 100 ? 1.0f : 0.0f, 0.0f, l, r, p);
+            if (std::abs (l) > 0.5f) { ++count; if (at < 0) at = i; }
+        }
+        CHECK (count >= 1 && count <= 2);                                             // one echo (an interpolated tap may straddle two samples)
+        CHECK (std::abs (at - (100 + (int) (0.25 * fs))) <= 1);
+    }
+    currentTest = "DV-03 bounded at maximum regeneration; no allocation";
+    {
+        Dissolve d;
+        d.prepare (fs);
+        Dissolve::Params p;
+        p.dissolve = 0.6f; p.spray = 1.0f; p.regen = 5.0f; p.damp = 1.0f; p.drive = 3.0f;   // regeneration asked far beyond its limit
+        const auto x = noise (48000 * 6, 1.0f);
+        float l, r, peakOut = 0;
+        bool finite = true;
+        watched = pthread_self();
+        allocs = 0;
+        malloc_logger = countAllocs;
+        for (auto v : x) { d.process (v, v, l, r, p); peakOut = std::max (peakOut, std::max (std::abs (l), std::abs (r))); finite = finite && std::isfinite (l) && std::isfinite (r); }
+        malloc_logger = nullptr;
+        CHECK (finite && peakOut < 16.0f);                                            // the engine's own clip follows; this only has to stay sane
+        CHECK (allocs.load() == 0);
+        // DV-04 / DV-06: reset forgets everything
+        currentTest = "DV-04 PANIC clears its memory";
+        d.reset();
+        peakOut = 0;
+        for (int i = 0; i < 48000 * 3; ++i) { d.process (0.0f, 0.0f, l, r, p); peakOut = std::max (peakOut, std::max (std::abs (l), std::abs (r))); }
+        CHECK (peakOut == 0.0f);
+        CHECK (d.memoryBytes() < 2 * 1024 * 1024);                                    // DV-06: a fixed, small history (2 s stereo)
+    }
+    currentTest = "DV-05 switching voices is click-free and the engine stays bounded";
+    {
+        Engine e;
+        e.prepare (fs);
+        auto c = defaults();
+        c.p[kTone] = 0.2f; c.p[kPitch] = 0.1f;
+        Buf tone (48000 * 3);
+        for (size_t i = 0; i < tone.size(); ++i) tone[i] = 0.3f * std::sin (2.0f * kPi * 100.0f * (float) i / 48000.0f);
+        Buf y;
+        for (int seg = 0; seg < 60; ++seg)
+        {
+            c.voice = seg % 3;
+            Buf l (2400), r (2400);
+            e.process (tone.data() + seg * 2400, tone.data() + seg * 2400, tone.data() + seg * 2400, l.data(), r.data(), 2400, c);
+            y.insert (y.end(), l.begin(), l.end());
+        }
+        float step = 0;
+        for (size_t i = 1; i < y.size(); ++i) step = std::max (step, std::abs (y[i] - y[i - 1]));
+        CHECK (step < 0.03f);
+        CHECK (peak (y) <= Engine::kCeiling && allFinite (y));
+        // knob jumps with a LAB voice selected: no step (Dissolve's parameters are smoothed like the resonator's)
+        Buf x (48000);
+        for (size_t i = 0; i < x.size(); ++i) x[i] = 0.3f * std::sin (2.0f * kPi * 100.0f * (float) i / 48000.0f);
+        for (int v = 1; v < 3; ++v)
+        {
+            auto maxStep = [&] (Controls a, Controls b)
+            {
+                Engine e3;
+                e3.prepare (fs);
+                Buf firstHalf (x.begin(), x.begin() + 24000), secondHalf (x.begin() + 24000, x.end());
+                auto y1 = run (e3, firstHalf, a, 64);
+                const auto y2 = run (e3, secondHalf, b, 64);
+                y1.insert (y1.end(), y2.begin(), y2.end());
+                float m = 0;
+                for (size_t i = 2; i < y1.size(); ++i) m = std::max (m, std::abs (y1[i] - y1[i - 2]));
+                return m;
+            };
+            auto base = defaults();
+            base.voice = v; base.p[kTone] = 0.2f; base.p[kPitch] = 0.1f; base.p[kDrift] = 0.0f; base.p[kCouple] = 0.0f;
+            const float steady = maxStep (base, base);
+            for (int p : { (int) kShape, (int) kTone, (int) kFeedback, (int) kMix, (int) kLevel, (int) kDrift, (int) kCouple })
+                for (float to : { 0.0f, 1.0f })
+                {
+                    auto b = base;
+                    b.p[p] = to;
+                    const float step2 = maxStep (base, b);
+                    CHECK (step2 < steady + 0.03f);
+                    if (step2 >= steady + 0.03f) std::printf ("    voice %d, %s -> %.0f: step %.3f (steady %.3f)\n", v, paramNames[p], (double) to, (double) step2, (double) steady);
+                }
+        }
+
+        currentTest = "DV-07 a deselected Dissolve keeps nothing";
+        {
+            // voice 1 hears noise for a second; voice 0 for three; then voice 1 again. From the moment it is re-selected the
+            // output must be what it would be if Dissolve had never run before - nothing from the first second comes back.
+            const auto loud2 = noise (48000 * 5, 0.4f);
+            auto c2 = defaults();
+            c2.p[kMix] = 1.0f; c2.p[kPitch] = 0.0f;                                   // the longest TIME: 1.6 s
+            Engine used, fresh;
+            used.prepare (fs); fresh.prepare (fs);
+            Buf lu (loud2.size()), ru (loud2.size()), lf (loud2.size()), rf (loud2.size());
+            const Buf zeros (loud2.size(), 0.0f);
+            auto go = [&] (Engine& e4, Buf& l, Buf& r, size_t from, size_t to, int voiceNow, const Buf& in)
+            { auto c4 = c2; c4.voice = voiceNow; for (size_t at = from; at + 64 <= to; at += 64) e4.process (in.data() + at, in.data() + at, zeros.data() + at, l.data() + at, r.data() + at, 64, c4); };
+            go (used, lu, ru, 0, 48000, 1, loud2);       go (fresh, lf, rf, 0, 48000, 0, loud2);
+            go (used, lu, ru, 48000, 192000, 0, loud2);  go (fresh, lf, rf, 48000, 192000, 0, loud2);
+            go (used, lu, ru, 192000, 240000, 1, zeros); go (fresh, lf, rf, 192000, 240000, 1, zeros);
+            CHECK (depth::same (Buf (lu.begin() + 192000, lu.begin() + 239936), Buf (lf.begin() + 192000, lf.begin() + 239936)));
+        }
+
+        for (int v = 1; v < 3; ++v)                                                   // each LAB voice makes sound, and PANIC silences it
+        {
+            Engine e2;
+            e2.prepare (fs);
+            auto c2 = defaults();
+            c2.voice = v; c2.p[kMix] = 1.0f; c2.p[kFeedback] = 0.9f;
+            const auto x = testSource (fs, 48000 * 2);
+            Buf l (x.size()), r (x.size());
+            e2.process (x.data(), x.data(), x.data(), l.data(), r.data(), (int) x.size(), c2);
+            CHECK (rms (l) > 1.0e-3f);
+            e2.panic();
+            const Buf silence (48000 * 3, 0.0f);
+            Buf l2 (silence.size()), r2 (silence.size());
+            e2.process (silence.data(), silence.data(), silence.data(), l2.data(), r2.data(), (int) silence.size(), c2);
+            CHECK (peak (l2) == 0.0f);
+        }
+    }
+}
+} // namespace voice
+
 // ---- informational: what the control states do to level and brightness. Proxies only; nobody has listened to these.
 void metrics()
 {
@@ -1378,6 +1534,7 @@ int main (int argc, char** argv)
     depth::all();
     tuner::all();
     strike::all();
+    voice::all();
     if (argc > 1 && std::strcmp (argv[1], "--metrics") == 0) metrics();
     std::printf ("%d checks, %d failed\n", checks, failures);
     return failures;
