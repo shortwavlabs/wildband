@@ -1,6 +1,6 @@
 # WILDBAND — Product Roadmap
 
-**Version 1.2 | 2026-11-27 | Owner-agreed planning direction.** Candidate implementations, DSP choices, design and release gates still require evidence. Includes Rings as a priority resonator experiment, ATMOSPHERE and macOS AUv3 feasibility.
+**Version 1.3 | 2026-11-27 | Owner-agreed planning direction.** Candidate implementations, DSP choices, design and release gates still require evidence. Includes Rings as a priority resonator experiment, ATMOSPHERE and macOS AUv3 feasibility.
 
 **Play the world. The world is your oscillator.**
 
@@ -88,7 +88,7 @@ P1-E possible normalled path: RADIO/TUNER → excitation/resonance/corruption �
 ## P3 — WORLD (Dec 31)
 
 ### RADIO
-Essential saved URLs, preset buttons/NEXT/PREV, MIDI navigation, off-centre degradation, adjustable synthesized static during actual deliberate buffering, broadcast envelope/transients. Static excites patch, preserves tails, no artificial delay or endless hiss, truthful failure status. Distinguish broadcast-only features from combined tuner activity. High: manual random HOP, rate-limited patchable station-hop trigger (ROOM hit, etc.), prevent synthetic-static trigger loops. Stretch: clock hopping, second independently tuned receiver, multi-stream prebuffering. [Tuner research](RADIO-TUNER-PERFORMANCE.md).
+Essential worldwide searchable station catalog (Radio Browser first), per-patch/set up to six ordered user-selected stations including manual URLs, two independently tunable receivers A/B (B off by default), preset buttons/NEXT/PREV, MIDI navigation, off-centre degradation, adjustable synthesized static during actual deliberate buffering, broadcast envelope/transients. Strict maximum two simultaneous stream sessions per instrument including previews/retunes; no six-stream prebuffer. Separate A/B audio and modulation, mixer/cross-routing; saved sets work independently of catalog availability. See [Worldwide radio catalog and sets](WORLD-RADIO-CATALOG.md). Static excites patch, preserves tails, no artificial delay or endless hiss, truthful failure status. Distinguish broadcast-only features from combined tuner activity. High: manual random HOP, rate-limited patchable station-hop trigger (ROOM hit, etc.), prevent synthetic-static trigger loops. Stretch: clock hopping; globe/map discovery and additional providers are optional/future. Prebuffering must never exceed two live sessions. [Tuner research](RADIO-TUNER-PERFORMANCE.md).
 
 ### ROOM
 Essential opt-in LEVEL/HITS/BRIGHTNESS, no raw monitoring by default, sensitivity and useful response. Audition clap/speech/taps on headphones; stale/denied/off neutral, playback uninterrupted. Helper lifecycle/signing and plugin permissions release concerns.
@@ -119,7 +119,7 @@ Blender static enclosure, textures, filmstrips, glass, illumination/shadows; JUC
 
 ## P5 — Performance and refinement (Jan 14)
 
-Essential MIDI learn, navigation, saved maps, actual hardware testing (Launch Control XL, BeatStep, Keystep). High: TOUCH, stable MIDI mapping of connection depth. Stretch: footswitch, MIDI clock. Mouse equally usable. Persist only stations, controls, routes/depth, MIDI and generic source settings, not captured LOOP audio, recordings, sensor history or delay contents. Restore LOOP empty; configuration only. Restore gracefully, no unsolicited permission or network surprise.
+Essential MIDI learn, navigation, saved maps, actual hardware testing (Launch Control XL, BeatStep, Keystep). High: TOUCH, stable MIDI mapping of connection depth. Stretch: footswitch, MIDI clock. Mouse equally usable. Persist only six-slot set references and independent A/B selections, controls, routes/depth, MIDI and generic source settings, not captured LOOP audio, recordings, sensor history or delay contents. Restore LOOP empty; configuration only. Restore gracefully, no unsolicited permission or network surprise.
 
 Two owner 15-minute sessions, matched ENGINE/DRY/REFERENCE, MIDI and ROOM evidence, unfamiliar musicians if feasible. First minute compelling sound, understandable tuner/patch, meaningful WORLD causality, contrasting states, recovery, voluntary return. Separate subjective and technical verdicts.
 
@@ -148,10 +148,10 @@ Fennesz-inspired intimate performance, not feature checklist. Show qualifying pl
 
 ## Scope and decision gates
 
-Essential: distinctive voice, live tuner/static/detune, semi-modular audio/CV, independent depth, ROOM, MIDI, polished original UI/display, safe feedback/recovery, configuration persistence, signed/notarized contest-eligible plugin, planned macOS AUv2 and VST3 release formats, source and demo.
+Essential: distinctive voice, worldwide station catalog, six-slot sets, two independent live receivers maximum, live tuner/static/detune, semi-modular audio/CV, independent depth, ROOM, MIDI, polished original UI/display, safe feedback/recovery, configuration persistence, signed/notarized contest-eligible plugin, planned macOS AUv2 and VST3 release formats, source and demo.
 
 High: tiny Tapestry-derived LOOP with volatile capture/chop/mangle, Rings early audition, selected Korupt/AFTERIMAGE/Wyrd/Drift candidates (not guaranteed inclusions), auxiliary mixer/feedback, follower/gate, SENSE, environmental hop, iPhone bridge, ATMOSPHERE, AUv3 feasibility and additional qualified macOS format.
 
-Stretch: second radio, custom phone companion, advanced spectral processing, general clock/trigger. Post-contest: Windows, iPadOS/mobile AUv3, broader sensing, external SDR/pickups and hardware.
+Stretch: globe/map catalog exploration, custom phone companion, advanced spectral processing, general clock/trigger. Post-contest: Windows, iPadOS/mobile AUv3, broader sensing, external SDR/pickups and hardware.
 
 Critical risks: unproven musical voice, licensing/provenance, plugin service lifecycle, complex interface, holidays and audition availability, broadcaster terms and signing/packaging. Keep work staged in draft PRs. Review at each listening gate; no unsupported pass, no merge/release without approval. Roadmap is living planning direction, not a claim of finished capabilities.
