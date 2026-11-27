@@ -1,0 +1,29 @@
+VST3 receiver lifecycle
+  pass  RL-10 scan-like (construct, query, destroy) x3: 0 connections
+  pass  RL-11 prepare and release without rendering: 0 connections
+  pass  RL-12 4 s rendered as fast as possible (as validators do), then 2.5 s idle: 0 connections
+  pass  RL-13 offline rendering, paced in real time, 4 s: 0 connections
+  pass  RL-14 restore a saved state, then 2.5 s: 0 connections
+  pass  RL-15 real-time rendering: 1 connection(s), opened 1.84 s after rendering began; sound in the last 1.3 s (peak 0.011)
+  pass  RL-16 rendering stops: connection closed 5.34 s later (1 opened, 1 closed)
+  pass  RL-16 rendering resumes in real time: 1 new connection
+  pass  RL-17 releaseResources while active: closed 0.28 s later
+  pass  RL-17 destroyed while active: closed 0.26 s later; open now: 0
+  pass  no connection left open overall (3 opened, 3 closed)
+AudioUnit receiver lifecycle
+  pass  RL-10 scan-like (construct, query, destroy) x3: 0 connections
+  pass  RL-11 prepare and release without rendering: 0 connections
+  pass  RL-12 4 s rendered as fast as possible (as validators do), then 2.5 s idle: 0 connections
+  pass  RL-13 offline rendering, paced in real time, 4 s: 0 connections
+  pass  RL-14 restore a saved state, then 2.5 s: 0 connections
+  pass  RL-15 real-time rendering: 1 connection(s), opened 1.83 s after rendering began; sound in the last 1.3 s (peak 0.011)
+  pass  RL-16 rendering stops: connection closed 5.34 s later (1 opened, 1 closed)
+  pass  RL-16 rendering resumes in real time: 1 new connection
+  pass  RL-17 releaseResources while active: closed 0.31 s later
+  pass  RL-17 destroyed while active: closed 0.30 s later; open now: 0
+  pass  no connection left open overall (6 opened, 6 closed)
+22 checks, 0 failed
+AudioUnit validation (auval), RL-18
+  pass  RL-19 auval: AU VALIDATION SUCCEEDED
+  pass  RL-18 auval opened 0 connections to the counting server
+  pass  RL-18 no remote TCP connection seen from the auval process (sampled every 0.2 s)

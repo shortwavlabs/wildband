@@ -70,3 +70,52 @@ opened and closed):
 | RL-19 | Unchanged: `auval` passes; the frozen hosted parameter order; the existing headless checks |
 
 Not established by this, still owner/host tasks: what Logic and Live actually do when scanning, loading and playing.
+
+---
+
+## Results (added after implementation, 2026-11-27)
+
+**What a unit test, the headless bundle check and `auval` established. Nothing was tried in a DAW.**
+
+Implementation: `src/ReceiverGate.h` (the rule, no JUCE) and `src/Plugin.cpp` (the audio thread only records how much
+it rendered and when; the 30 Hz message-thread timer drains prepare/release events, updates the gate, requests the
+station only while ACTIVE, and cancels the stream on every transition out of ACTIVE and in the destructor).
+`tools/stream_test_server.py --log` records every connection; `tools/run_plugin_lifecycle_check.sh` runs the
+bundle checks and `auval` against it.
+
+| ID | Result | Measured |
+|---|---|---|
+| RL-01 … RL-07 | **Pass** | `wildband_tests` (950 checks with Rings configured) |
+| RL-10 | **Pass** | 0 connections, both formats, three scan-like cycles each |
+| RL-11 | **Pass** | 0 |
+| RL-12 | **Pass** | 0 |
+| RL-13 | **Pass** | 0 (VST3 offline process mode; AU offline-render property, set directly — see below) |
+| RL-14 | **Pass** | 0 |
+| RL-15 | **Pass** | exactly 1 connection, opened 1.8 s after real-time rendering began (both formats); sound in the last second |
+| RL-16 | **Pass** | closed 5.3 s after rendering stopped; one new connection on resuming |
+| RL-17 | **Pass** | release: closed 0.3–0.5 s later; destroy: closed 0.3 s later; nothing left open |
+| RL-18 | **Pass** | `auval` (with the counting server's stations in its environment): 0 connections to the server; no remote TCP connection seen from the `auval` process |
+| RL-19 | **Pass** | `auval` succeeds; the general headless check (24 checks, frozen hosted parameter order unchanged) passes; 27 real-time tuner checks pass |
+
+Full output: [`evidence/plugin-lifecycle-check.txt`](evidence/plugin-lifecycle-check.txt),
+[`evidence/plugin-check.txt`](evidence/plugin-check.txt), [`evidence/auval.txt`](evidence/auval.txt).
+
+**Found by these checks and fixed:**
+
+1. On `releaseResources` the stream was **not** cancelled: the timer looked at "was it active?" after the release
+   event had already made it dormant, so the transition went unnoticed and the connection stayed open (it closed
+   only when the plugin was destroyed). The check is now taken before events are applied.
+2. JUCE's AU *hosting* code does not pass `setNonRealtime` on to an Audio Unit, so the first AU offline test was
+   not offline at all. The check now sets the AU's own `kAudioUnitProperty_OfflineRender`, as Logic does for a bounce.
+   The plugin side (JUCE's AU wrapper) already honours that property.
+
+**Limits of this evidence:**
+
+- The rule is inferred, not confirmed against real hosts: what Logic and Live do while scanning, loading a project
+  and playing must still be observed (the counting server and `WILDBAND_TEST_STATIONS` make that easy: point the
+  stations at it, launch the host, count).
+- A host that renders "in real time" for 1.5 s without the user meaning to play (for example a long live preview
+  while browsing) would activate the receiver. That is the price of not having an explicit control; an explicit
+  "receive" switch in the future editor would remove the guess.
+- Suspension after 5 s without callbacks means a stopped transport that keeps calling `processBlock` (as most hosts
+  do) keeps the stream: that is intended — the instrument stays live while the track is armed or monitored.

@@ -3,7 +3,8 @@
 // WILDBAND P0 engine tests. Plain checks, no framework; exit code = number of failed checks.
 // `wildband_tests --metrics` also prints level/brightness figures for a few control states (proxies, not listening).
 #include "../src/Engine.h"
-#include "baseline/Engine.h"   // the auditioned engine, frozen: reference for depth +100 %
+#include "baseline/Engine.h"
+#include "../src/ReceiverGate.h"   // the auditioned engine, frozen: reference for depth +100 %
 
 #include <cstdio>
 #include <cstring>
@@ -1669,6 +1670,108 @@ void all()
 } // namespace ringsTests
 #endif
 
+
+// =====================================================================================================================
+// Plugin receiver gate: docs/p1/PLUGIN-RECEIVER-LIFECYCLE.md
+namespace gateTests
+{
+using G = ReceiverGate;
+/** Feeds the gate a scenario: `audioPerWall` seconds of audio per wall second (0 = no callbacks), sampled at 30 Hz. */
+G::State drive (G& g, double& now, double& rendered, double& lastCb, double seconds, double audioPerWall, bool offline = false)
+{
+    G::State s = g.current();
+    for (double t = 0; t < seconds; t += 1.0 / 30.0)
+    {
+        now += 1.0 / 30.0;
+        if (audioPerWall > 0) { rendered += audioPerWall / 30.0; lastCb = now; }
+        s = g.update (now, rendered, lastCb, offline);
+    }
+    return s;
+}
+
+void all()
+{
+    currentTest = "RL-01 construction, prepare and restore never activate";
+    {
+        G g;
+        double now = 100, rendered = 0, last = -1;
+        CHECK (g.current() == G::State::Dormant);
+        CHECK (drive (g, now, rendered, last, 10, 0) == G::State::Dormant);
+        CHECK (drive (g, now, rendered, last, 10, 1.0) == G::State::Dormant);      // even rendering does nothing before prepare
+        g.prepared (false);
+        CHECK (g.current() == G::State::Armed);
+        last = -1;
+        CHECK (drive (g, now, rendered, last, 10, 0) == G::State::Armed);           // prepared, but nothing rendered
+    }
+    currentTest = "RL-02 faster than real time never activates";
+    for (double speed : { 2.5, 10.0, 1000.0 })
+    {
+        G g;
+        g.prepared (false);
+        double now = 100, rendered = 0, last = -1;
+        CHECK (drive (g, now, rendered, last, 20, speed) == G::State::Armed);
+    }
+    currentTest = "RL-03 real time: 1.4 s is not enough, 1.6 s is";
+    {
+        G g;
+        g.prepared (false);
+        double now = 100, rendered = 0, last = -1;
+        CHECK (drive (g, now, rendered, last, 1.4, 1.0) == G::State::Armed);
+        CHECK (drive (g, now, rendered, last, 0.25, 1.0) == G::State::Active);
+        G slow;                                                                    // a busy host running a little late still counts
+        slow.prepared (false);
+        double n2 = 100, r2 = 0, l2 = -1;
+        CHECK (drive (slow, n2, r2, l2, 1.7, 0.7) == G::State::Active);
+    }
+    currentTest = "RL-04 a gap restarts the window";
+    {
+        G g;
+        g.prepared (false);
+        double now = 100, rendered = 0, last = -1;
+        drive (g, now, rendered, last, 1.0, 1.0);
+        drive (g, now, rendered, last, 0.6, 0.0);                                    // 0.6 s without callbacks
+        CHECK (drive (g, now, rendered, last, 1.0, 1.0) == G::State::Armed);        // only 1 s since the gap
+        CHECK (drive (g, now, rendered, last, 0.6, 1.0) == G::State::Active);
+    }
+    currentTest = "RL-05 offline rendering never activates, and suspends";
+    {
+        G g;
+        g.prepared (true);
+        double now = 100, rendered = 0, last = -1;
+        CHECK (drive (g, now, rendered, last, 10, 1.0, true) == G::State::Dormant);
+        G h;
+        h.prepared (false);
+        double n2 = 100, r2 = 0, l2 = -1;
+        CHECK (drive (h, n2, r2, l2, 2, 1.0) == G::State::Active);
+        CHECK (drive (h, n2, r2, l2, 0.1, 1.0, true) == G::State::Suspended);       // host switches to offline
+        CHECK (drive (h, n2, r2, l2, 10, 1.0, true) == G::State::Suspended);
+    }
+    currentTest = "RL-06 silence from the host suspends; only real-time audio resumes";
+    {
+        G g;
+        g.prepared (false);
+        double now = 100, rendered = 0, last = -1;
+        drive (g, now, rendered, last, 2, 1.0);
+        CHECK (drive (g, now, rendered, last, 4.9, 0.0) == G::State::Active);
+        CHECK (drive (g, now, rendered, last, 0.2, 0.0) == G::State::Suspended);
+        CHECK (drive (g, now, rendered, last, 5, 50.0) == G::State::Suspended);    // fast rendering does not resume it
+        // a window that began during the fast phase is discarded first, so resuming can take up to two windows
+        CHECK (drive (g, now, rendered, last, 1.4, 1.0) == G::State::Suspended);
+        CHECK (drive (g, now, rendered, last, 1.8, 1.0) == G::State::Active);
+    }
+    currentTest = "RL-07 release goes dormant at once";
+    {
+        G g;
+        g.prepared (false);
+        double now = 100, rendered = 0, last = -1;
+        drive (g, now, rendered, last, 2, 1.0);
+        g.released();
+        CHECK (g.current() == G::State::Dormant);
+        CHECK (drive (g, now, rendered, last, 5, 1.0) == G::State::Dormant);
+    }
+}
+} // namespace gateTests
+
 // ---- informational: what the control states do to level and brightness. Proxies only; nobody has listened to these.
 void metrics()
 {
@@ -1742,6 +1845,7 @@ int main (int argc, char** argv)
     tuner::all();
     strike::all();
     voice::all();
+    gateTests::all();
    #if WILDBAND_HAS_RINGS
     ringsTests::all();
    #endif
