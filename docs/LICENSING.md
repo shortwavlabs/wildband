@@ -53,7 +53,8 @@ and every external source it pulled in:
 | JUCE | always | commit `d60b7a78030661574a615b586d9325ba7a7fa7dd` (pinned in `CMakeLists.txt`) |
 | Third-party code inside JUCE (zlib, HarfBuzz, SheenBidi, LunaSVG/PlutoVG, libpng, IJG jpeglib) | always, via JUCE | covered by the JUCE commit; licence texts in `licenses/` |
 | VST3 SDK, AudioUnitSDK | plugin builds | covered by the JUCE commit; licence texts in `licenses/` |
-| Any optional upstream enabled at configure time (for example Rings and `stmlib` with `-DEURORACK_DIR` / `-DWILDBAND_FETCH_RINGS=ON`) | **only if enabled** | the upstream repositories and exact commits, and their licence texts in the bundle. A build that enables an optional upstream ships that upstream's source obligations too |
+| **Rings** (`pichenettes/eurorack` at `f4cfa7697095a28d292bff758beb51deb49b5a86`) and **stmlib** (`pichenettes/stmlib` at `e3bd7c9cc00e4364166f9905c0509b6ffd0535ec`), MIT | only with `-DEURORACK_DIR` or `-DWILDBAND_FETCH_RINGS=ON` | both repositories and commits; `licenses/Rings-stmlib-MIT.txt` in the bundle |
+| Any other optional upstream enabled at configure time | **only if enabled** | the upstream repositories and exact commits, and their licence texts in the bundle. A build that enables an optional upstream ships that upstream's source obligations too |
 
 A release built from a configuration not listed here is not ready to ship.
 
