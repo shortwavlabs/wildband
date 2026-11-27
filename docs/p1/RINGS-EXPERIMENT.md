@@ -102,6 +102,23 @@ attempt; eight upstream source files are compiled.
 Only the costliest model (sympathetic strings) was swept on CoreAudio. Roughly: Rings costs about twice the
 current resonator and is still far inside the budget.
 
+### Mandatory production fixes if Rings is selected
+
+Rings is **not musically accepted**; it is an experiment awaiting the owner's audition. If it is chosen, these two
+are release blockers, not polish:
+
+1. **Sample-rate adaptation.** Upstream runs as if at 48 kHz. At any other device rate the adapter only corrects the
+   pitch; filter coefficients, decay times and the reverb all scale with the rate. A production voice must run
+   Rings at its native 48 kHz behind a qualified, bounded-latency resampler (or upstream must be made
+   rate-independent and requalified against the pinned reference), with tests at 44.1, 48, 88.2 and 96 kHz.
+2. **Shared random-number state — a data race.** `stmlib::Random` keeps a single *static* state per process
+   (`Random::rng_state_`), read and written without synchronisation by Rings' string model (and its plucker). Two
+   WILDBAND instances in one host, or any two threads running that code, access it concurrently: **that is a data
+   race and undefined behaviour in C++**, not merely correlated noise between instances. A production build must
+   give each voice its own generator (for example by compiling a WILDBAND replacement for `random.cc`/`random.h`
+   with per-instance state, recorded as a modification of upstream with its MIT notice), and prove it with a
+   thread-sanitiser run of two instances.
+
 ### Honest limits
 
 - **Fixed 48 kHz inside.** At 44.1 or 96 kHz the pitch is corrected but timbre and decay times scale with the
@@ -114,6 +131,8 @@ current resonator and is still far inside the budget.
   loudness, when comparing.
 - Upstream's own reverb and limiter are left as they are; they are part of what is heard.
 - Rings is fetched from outside the repository; a build without it has no Rings voices.
+- `stmlib::Random` keeps one static state per process, used without synchronisation by the string model: with two
+  instances this is a data race (see "Mandatory production fixes" above).
 
 ### How to audition
 
