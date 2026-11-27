@@ -65,3 +65,8 @@ After P0 owner audition, explore an auxiliary mixer with deliberately bounded fe
 6. Can the standalone performance interface and MIDI mapping be qualified under real-world operation?
 
 **Exit gate:** no architectural promotion until P0 evidence and owner listening report.
+
+
+## Post-P0 LOOP / Microsound
+
+See [Tapestry reuse research](TAPESTRY-LOOPER-RESEARCH.md) for the approved short volatile capture exception: fixed-capacity per-instance stereo memory, bounded slice/grain processing, no audio serialization, explicit capture, and host/retune/clear lifecycle. Does not expand P0.
