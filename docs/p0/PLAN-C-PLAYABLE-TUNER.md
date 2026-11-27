@@ -1,6 +1,7 @@
 # WILDBAND — Plan C: playable radio tuner (next experiment, not started)
 
-**Status:** plan only. Nothing here is implemented. Source: `OWNER-FIRST-AUDITION.md` §C and
+**Status:** this was the plan. **It has since been carried out on branch `p0/tuner`**; what was built, the tests and
+their results are in `TUNER-ACCEPTANCE.md` on that branch. The text below is kept as written. Originally: plan only. Source: `OWNER-FIRST-AUDITION.md` §C and
 `RADIO-TUNER-PERFORMANCE.md` (docs branch). Branch when started: `p0/tuner`, from the attenuverter branch once the
 owner has auditioned it (the patch hand-off changes there), otherwise from `p0/prototype`.
 
