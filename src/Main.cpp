@@ -909,7 +909,8 @@ private:
             if (const int note = p.getIntValue ("noteAction" + juce::String (target - kNumParams), -1); note >= 0 && note < 128) instrument.noteMap[(size_t) note] = (int8_t) target;
         }
         instrument.strikeResponse = juce::jlimit (0, 2, p.getIntValue ("labStrikeResponse", 0));
-        instrument.voice = juce::jlimit (0, kLabVoices - 1, p.getIntValue ("labVoice", 0));
+        instrument.voice = p.getIntValue ("labVoice", 0);
+        if (instrument.voice.load() < 0 || instrument.voice.load() >= kLabVoices) instrument.voice = 0;   // e.g. a Rings voice saved by a build that had Rings
         instrument.params[kLevel] = juce::jmin (instrument.params[kLevel].load(), paramDefaults[kLevel]);   // never start loud
         // "cables" stays in P0's format so both builds can share one settings file; depths live under their own key
         if (p.containsKey ("cables")) patch.graph = loadPatch (p.getValue ("cables").toStdString(), p.getValue ("cableDepths").toStdString());

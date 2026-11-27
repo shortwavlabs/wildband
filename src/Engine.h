@@ -269,10 +269,10 @@ public:
     void reset() noexcept
     {
         staticGain = 0.0f;
-        dissolve.reset();
+        if (dissolveHeard || dissolveRunning) dissolve.reset();      // (1-2 MB: only if it has been used since it was last cleared)
         dissolveHeard = false;
        #if WILDBAND_HAS_RINGS
-        rings.reset();
+        if (ringsHeard || ringsRunning) rings.reset();
         ringsHeard = false;
        #endif
         for (auto& l : lines) std::fill (l.begin(), l.end(), 0.0f);
@@ -587,12 +587,13 @@ private:
        #if WILDBAND_HAS_RINGS
         // Rings borrows the panel too: PITCH = note, SHAPE = STRUCTURE, TONE = BRIGHTNESS, FEEDBACK = DAMPING (decay),
         // DRIFT = POSITION, under the same control inputs. Upstream interpolates these across each 24-sample block.
-        ringsP.note = 36.0f + 48.0f * pt[kPitch] + cpl * cvIn (kResPitchIn);
-        ringsP.structure = clamp01 (pt[kShape] + 0.35f * cpl * cvIn (kResShapeIn));
-        ringsP.brightness = clamp01 (pt[kTone] + 0.5f * cpl * cvIn (kResDampIn));
-        ringsP.damping = clamp01 (pt[kFeedback] + 0.3f * cpl * cvIn (kResFeedbackIn));
-        ringsP.position = clamp01 (drift + 0.5f * cpl * cvIn (kResDriftIn));
-        ringsP.drive = std::min (3.0f, 2.0f * exciteT);
+        // (pc: the smoothed knob values - upstream interpolates only within a block, so jumps must arrive smoothed)
+        ringsP.note = 36.0f + 48.0f * pc[kPitch] + pc[kCouple] * cvIn (kResPitchIn);
+        ringsP.structure = clamp01 (pc[kShape] + 0.35f * pc[kCouple] * cvIn (kResShapeIn));
+        ringsP.brightness = clamp01 (pc[kTone] + 0.5f * pc[kCouple] * cvIn (kResDampIn));
+        ringsP.damping = clamp01 (pc[kFeedback] + 0.3f * pc[kCouple] * cvIn (kResFeedbackIn));
+        ringsP.position = clamp01 (pc[kDrift] + 0.5f * pc[kCouple] * cvIn (kResDriftIn));
+        ringsP.drive = std::min (3.0f, 2.0f * excite);
        #endif                                  // keeps loudness roughly level as the loop closes
     }
 
