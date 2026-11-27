@@ -52,7 +52,7 @@ public:
     std::array<std::atomic<float>, kNumParams> params;
     std::atomic<int> mode { 0 };
     std::atomic<uint64_t> plan { 0 };                       // RoutingPlan::pack, written by the patch bay
-    std::atomic<bool> roomEnabled { false }, panic { false };
+    std::atomic<bool> roomEnabled { false }, panic { false }, stallOnce { false };   // stallOnce: --measure positive control only
     std::array<std::atomic<int8_t>, 128> ccMap;             // controller number -> Param, -1 = unmapped
     std::atomic<int> learnTarget { -1 }, midiEvents { 0 };
     std::atomic<bool> mapDirty { false };
@@ -125,6 +125,8 @@ public:
         for (int ch = 2; ch < numOut; ++ch) if (out[ch] != nullptr) juce::FloatVectorOperations::clear (out[ch], n);
         roomLevel = c.room.level; roomActivity = c.room.activity; roomBrightness = c.room.brightness;
 
+        if (stallOnce.exchange (false))   // --measure positive control: overrun this callback by three periods, on purpose
+            while (juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - t0) < 3.0 * n / sampleRate.load()) {}
         const double us = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - t0) * 1.0e6;
         perf.histogram[(size_t) juce::jlimit (0, Perf::kBins - 1, (int) (us / 5.0))].fetch_add (1, std::memory_order_relaxed);
         perf.callbacks.fetch_add (1, std::memory_order_relaxed);
@@ -355,8 +357,10 @@ private:
 class MainComponent final : public juce::Component, private juce::Timer, private juce::ChangeListener
 {
 public:
-    MainComponent (const juce::String& measureFile, bool muted) : measurePath (measureFile), transient (muted || measureFile.isNotEmpty())
+    MainComponent (const juce::String& measureFile, bool muted, int station, const juce::String& output) : measurePath (measureFile), transient (muted || measureFile.isNotEmpty())
     {
+        outputOverride = output.startsWith ("snapshot:") ? juce::String() : output;
+        snapshotPath = output.startsWith ("snapshot:") ? output.fromFirstOccurrenceOf (":", false, false) : juce::String();
         juce::PropertiesFile::Options options;
         options.applicationName = "WILDBAND";
         options.filenameSuffix = "settings";
@@ -369,6 +373,13 @@ public:
 
         loadSettings();
         if (transient) instrument.params[kLevel] = 0.0f;      // --mute / --measure: everything runs, nothing is heard
+        if (station >= 0 && station < kNumStations)           // --station=N (test aid): start on slot N
+        {
+            instrument.params[kTune] = dialCentre (station, kNumStations);
+            wanted = tuned = station;
+            instrument.radio.tune (stations[(size_t) tuned].url);
+            urlEditor.setText (stations[(size_t) tuned].url, false);
+        }
         for (int i = 0; i < kNumParams; ++i)
         {
             auto& s = knobs[(size_t) i];
@@ -443,18 +454,31 @@ public:
         patch.onMessage = [this] (const juce::String& m) { flash (m); };
         patch.onChange();
 
-        // output only at launch: the microphone is opened by the ROOM button, never automatically
-        auto saved = settings.getUserSettings()->getXmlValue ("audio");
-        if (saved != nullptr) saved->removeAttribute ("audioInputDeviceName");
-        devices.initialise (0, 2, saved.get(), true);
-        closeInputs();
-        devices.addAudioCallback (&instrument);
-        devices.addChangeListener (this);
+        // KNOWN DEFECT (docs/p0/EVIDENCE-LOG.md): when the output device also has inputs (most USB interfaces), macOS
+        // shows its microphone prompt as soon as CoreAudio opens the device, and blocks this thread until it is
+        // answered, although no input is requested. So the window goes up first, with an explanation, and the device
+        // is opened a moment later (openAudio, from the timer).
+        if (microphoneAccess() == MicAccess::Undetermined)
+            roomMessage = "If macOS asks about the microphone now, it is because your audio interface has inputs. WILDBAND listens only while ROOM is on; either answer works.";
         openMidiInputs();
         midiList = juce::MidiDeviceListConnection::make ([this] { openMidiInputs(); });
 
         setSize (980, 640);
         startTimerHz (30);
+    }
+
+    void openAudio()
+    {
+        // output only at launch: the microphone is opened by the ROOM button, never automatically
+        auto saved = settings.getUserSettings()->getXmlValue ("audio");
+        if (saved != nullptr) saved->removeAttribute ("audioInputDeviceName");
+        juce::AudioDeviceManager::AudioDeviceSetup preferred;
+        preferred.outputDeviceName = outputOverride;
+        devices.initialise (0, 2, outputOverride.isEmpty() ? saved.get() : nullptr, true, {}, outputOverride.isEmpty() ? nullptr : &preferred);
+        closeInputs();
+        devices.addAudioCallback (&instrument);
+        devices.addChangeListener (this);
+        if (roomMessage.startsWith ("If macOS asks")) roomMessage.clear();
         if (measurePath.isNotEmpty()) beginMeasure();
     }
 
@@ -519,6 +543,17 @@ private:
     // ---- periodic UI work: follow MIDI, drive the tuner, show state. Nothing here touches the audio thread.
     void timerCallback() override
     {
+        if (++ticks == 4 && snapshotPath.isNotEmpty())   // --snapshot=FILE (test aid): draw the UI to a PNG and quit; audio is never opened
+        {
+            juce::FileOutputStream out { juce::File (snapshotPath) };
+            out.setPosition (0);
+            out.truncate();
+            juce::PNGImageFormat().writeImageToStream (createComponentSnapshot (getLocalBounds(), true, 2.0f), out);
+            juce::JUCEApplication::quit();
+            return;
+        }
+        if (ticks == 8) openAudio();            // a quarter of a second after the window appears
+
         for (int i = 0; i < kNumParams; ++i)
         {
             auto& s = knobs[(size_t) i];
@@ -558,7 +593,8 @@ private:
         if (now > flashUntil)
         {
             juce::String h;
-            if (learn.getToggleState()) h = "Touch a knob on screen, then move a control on your controller.";
+            if (ticks < 8 && roomMessage.isNotEmpty()) h = roomMessage;
+            else if (learn.getToggleState()) h = "Touch a knob on screen, then move a control on your controller.";
             else if (patch.graph.cableInto (kResAudioIn) < 0) h = "Nothing is patched into RESONATOR IN: drag a cable from an AUDIO output.";
             else if (patch.graph.cableInto (kResAudioIn) == kLocalAudioOut) h = "LOCAL TEST SOURCE is playing. It is not live radio.";
             else if (roomMessage.isNotEmpty()) h = roomMessage;
@@ -568,7 +604,7 @@ private:
 
         if (instrument.mapDirty.exchange (false)) { settingsDirty = true; learn.setToggleState (false, juce::dontSendNotification); }
         if (settingsDirty && now - lastSave > 2000) saveSettings();
-        if (measurePath.isNotEmpty()) stepMeasure();
+        if (measurePath.isNotEmpty() && ticks > 8) stepMeasure();
     }
 
     void flash (const juce::String& m) { hint.setText (m, juce::dontSendNotification); flashUntil = juce::Time::getMillisecondCounter() + 3000; }
@@ -726,6 +762,17 @@ private:
     {
         const auto now = juce::Time::getMillisecondCounter();
         if (now < measureNext) return;
+        if (measureStalling)
+        {
+            measureLog << "\nPositive control (one callback deliberately held for three buffer periods at the last setting): late callbacks counted = "
+                       << (juce::int64) instrument.perf.lateCallbacks.load() << ", max host-time gap " << juce::String (instrument.perf.maxGapMs.load(), 2) << " ms. "
+                       << (instrument.perf.lateCallbacks.load() > 0 ? "The late-callback counter responds to an overrun." : "The late-callback counter did NOT respond: the zeros above are NOT evidence of no dropouts.") << "\n";
+            devices.setAudioDeviceSetup (measureOriginal, true);         // put the interface back as it was found
+            juce::File (measurePath).replaceWithText (measureLog);
+            measurePath.clear();
+            juce::JUCEApplication::quit();
+            return;
+        }
         if (measureSettling) { instrument.perf.reset(); underruns0 = instrument.radio.underruns.load(); reconnects0 = instrument.radio.reconnects.load(); measureSettling = false; measureNext = now + 20000; return; }
         if (measureIndex >= 0)
         {
@@ -733,16 +780,16 @@ private:
             const auto& perf = instrument.perf;
             const double fs = instrument.sampleRate.load(), period = fs > 0 ? 1000.0 * instrument.blockSize.load() / fs : 0, n = (double) juce::jmax<uint64_t> (1, perf.callbacks.load());
             measureLog << "| " << step.rate << " (" << fs << ") | " << step.buffer << " / " << instrument.blockSize.load() << " | " << juce::String (period, 3) << " | " << (juce::int64) perf.callbacks.load()
-                       << " | " << juce::String (perf.sumUs.load() / n, 1) << " | " << juce::String (perf.percentileUs (0.999), 0) << " | " << juce::String (perf.maxUs.load(), 0)
+                       << " | " << juce::String (perf.sumUs.load() / n, 1) << " | " << juce::roundToInt (perf.percentileUs (0.999)) << " | " << juce::roundToInt (perf.maxUs.load())
                        << " | " << juce::String (period > 0 ? perf.maxUs.load() / (period * 10.0) : 0.0, 1) << " | " << (juce::int64) perf.lateCallbacks.load() << " | " << juce::String (perf.maxGapMs.load(), 2)
                        << " | " << instrument.radio.underruns.load() - underruns0 << " | " << instrument.radio.reconnects.load() - reconnects0 << " | " << instrument.engine.faults.load() << " |\n";
         }
         if (++measureIndex >= measureSteps.size())
         {
-            devices.setAudioDeviceSetup (measureOriginal, true);         // put the interface back as it was found
-            juce::File (measurePath).replaceWithText (measureLog);
-            measurePath.clear();
-            juce::JUCEApplication::quit();
+            instrument.perf.reset();
+            instrument.stallOnce = true;
+            measureStalling = true;
+            measureNext = now + 2000;
             return;
         }
         auto setup = devices.getAudioDeviceSetup();
@@ -774,14 +821,15 @@ private:
     int wanted = 0, tuned = 0, midiInputs = 0;
     juce::uint32 wantedSince = 0, flashUntil = 0, lastSave = 0;
     bool settingsDirty = false;
-    juce::String roomMessage;
+    int ticks = 0;
+    juce::String roomMessage, outputOverride, snapshotPath;
 
     juce::String measurePath, measureLog;
     const bool transient;
     juce::Array<MeasureStep> measureSteps;
     juce::AudioDeviceManager::AudioDeviceSetup measureOriginal;
     int measureIndex = -1, underruns0 = 0, reconnects0 = 0;
-    bool measureSettling = false;
+    bool measureSettling = false, measureStalling = false;
     juce::uint32 measureNext = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
@@ -799,7 +847,14 @@ public:
         juce::String measure;
         for (const auto& arg : juce::StringArray::fromTokens (commandLine, true))
             if (arg.startsWith ("--measure=")) measure = arg.fromFirstOccurrenceOf ("=", false, false).unquoted();
-        window = std::make_unique<Window> (measure, commandLine.contains ("--mute"));
+        int station = -1;
+        for (const auto& arg : juce::StringArray::fromTokens (commandLine, true))
+            if (arg.startsWith ("--station=")) station = arg.fromFirstOccurrenceOf ("=", false, false).getIntValue();
+        juce::String output;                                  // --output=NAME (test aid): use this output device, ignore the saved one
+        for (const auto& arg : juce::StringArray::fromTokens (commandLine, true))
+            if (arg.startsWith ("--output=")) output = arg.fromFirstOccurrenceOf ("=", false, false).unquoted();
+            else if (arg.startsWith ("--snapshot=")) output = "snapshot:" + arg.fromFirstOccurrenceOf ("=", false, false).unquoted();
+        window = std::make_unique<Window> (measure, commandLine.contains ("--mute") || output.startsWith ("snapshot:"), station, output);
     }
     void shutdown() override { window = nullptr; }
     void systemRequestedQuit() override { quit(); }
@@ -807,10 +862,10 @@ public:
 private:
     struct Window final : juce::DocumentWindow
     {
-        Window (const juce::String& measure, bool muted) : DocumentWindow ("WILDBAND", kBack, DocumentWindow::closeButton | DocumentWindow::minimiseButton)
+        Window (const juce::String& measure, bool muted, int station, const juce::String& output) : DocumentWindow ("WILDBAND", kBack, DocumentWindow::closeButton | DocumentWindow::minimiseButton)
         {
             setUsingNativeTitleBar (true);
-            setContentOwned (new MainComponent (measure, muted), true);
+            setContentOwned (new MainComponent (measure, muted, station, output), true);
             setResizable (true, false);
             setResizeLimits (860, 600, 1600, 1000);
             centreWithSize (getWidth(), getHeight());
