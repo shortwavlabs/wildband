@@ -124,6 +124,7 @@ void testBounded()
             c.mode = (Mode) (trial % 3);
             c.detune = u (rng);
             c.gap = trial % 3 == 0 ? 0.0f : u (rng) * 2.0f;                          // CT-11: tuner static in the hostile runs
+            c.strikeResponse = trial % 5 == 4 ? 99 : trial % 3;                      // SR-06: every response (and a nonsense value)
             c.room = { u (rng) * 3.0f, u (rng) * 3.0f, u (rng) * 3.0f };             // out-of-range room values too
             if (trial % 4 == 3) c.plan = garbagePlan (rng);                          // garbage plans too
             else if (trial % 4 == 1)                                                // AT-08: every destination at -1 or +1
@@ -430,6 +431,7 @@ void testNoAllocation()
     {
         c.p[b % kNumParams] = (float) (b % 17) / 16.0f;
         c.gap = (b / 400) % 2 ? 1.0f : 0.0f;                                         // CT-11: static starting and stopping
+        c.strikeResponse = (b / 250) % 3;                                            // SR-06
         c.mode = (Mode) ((b / 500) % 3);
         bus.publish (kEnvMicrophone, room.process (x.data(), 64), b);
         c.room = bus.read (b);
@@ -1182,6 +1184,132 @@ void all()
 }
 } // namespace tuner
 
+
+// =====================================================================================================================
+// STRIKE response candidates: docs/p0/STRIKE-RESPONSE.md
+namespace strike
+{
+const char* const names[3] = { "A Held (existing)", "B Fast", "C Organic" };
+struct Curve { float swell90 = -1, t90 = -1, t50 = -1, t10 = -1, t1 = -1; };
+Curve curves[3];
+float rhythmMin[3] = {}, rhythmMax[3] = {};
+
+/** Back-off (0..1) over time for a source that is `on (t)`, sampled every 10 ms. COUPLE 1, depth +1. */
+template <typename On> std::vector<float> backoff (int response, double seconds, On on)
+{
+    Engine e;
+    e.prepare (48000.0);
+    auto c = depth::loud();
+    c.strikeResponse = response;
+    c.plan = depth::plan (depth::with (depth::wire<Graph> (depth::kAudio), kRoomActivityOut, kResExciteIn, 1.0f));
+    const Buf in (480, 0.0f);
+    Buf l (480), r (480);
+    std::vector<float> out;
+    for (int block = 0; block < (int) (seconds * 100); ++block)
+    {
+        c.room = { 0.0f, on (block * 0.01) ? 1.0f : 0.0f, 0.0f };
+        e.process (in.data(), in.data(), in.data(), l.data(), r.data(), 480, c);
+        out.push_back (e.strikeBackoff());
+    }
+    return out;
+}
+
+void all()
+{
+    currentTest = "SR-02 every response is neutral for a silent source";
+    {
+        auto silentRoom = depth::loud();
+        silentRoom.room = {};
+        const Graph audio = depth::wire<Graph> (depth::kAudio);
+        const auto none = depth::render (depth::plan (audio), silentRoom).out;
+        for (int response = 0; response < 3; ++response)
+            for (float d : { -1.0f, 0.0f, 0.4f, 1.0f })
+            {
+                auto c = silentRoom;
+                c.strikeResponse = response;
+                CHECK (depth::same (none, depth::render (depth::plan (depth::with (audio, kRoomActivityOut, kResExciteIn, d)), c).out));
+            }
+    }
+
+    // one second of activity, then silence (a second, so that the slow-rising Organic response gets all the way in)
+    for (int response = 0; response < 3; ++response)
+    {
+        const auto b = backoff (response, 17.0, [] (double t) { return t < 1.0; });
+        auto& k = curves[response];
+        for (size_t i = 0; i < b.size(); ++i)
+        {
+            const float t = (float) i * 0.01f;
+            if (k.swell90 < 0 && b[i] >= 0.9f) k.swell90 = t;
+            if (t > 1.0f)
+            {
+                if (k.t90 < 0 && b[i] < 0.9f) k.t90 = t - 1.0f;
+                if (k.t50 < 0 && b[i] < 0.5f) k.t50 = t - 1.0f;
+                if (k.t10 < 0 && b[i] < 0.1f) k.t10 = t - 1.0f;
+                if (k.t1 < 0 && b[i] < 0.01f) k.t1 = t - 1.0f;
+            }
+        }
+    }
+    currentTest = "SR-03 Fast is fast";
+    CHECK (curves[1].t10 > 0 && curves[1].t10 < 1.5f);
+    CHECK (curves[1].t1 > 0 && curves[1].t1 < 2.5f);
+    currentTest = "SR-04 Organic is gradual";
+    {
+        const auto swell = backoff (2, 3.0, [] (double) { return true; });            // a source that stays on: how fast does it come in?
+        float t90 = -1;
+        for (size_t i = 0; i < swell.size(); ++i) if (t90 < 0 && swell[i] >= 0.9f) t90 = (float) i * 0.01f;
+        CHECK (t90 > 0.3f);
+        const auto b = backoff (2, 16.0, [] (double t) { return t < 1.0; });          // after a second of activity
+        CHECK (b[300] > 0.5f);                                                        // still more than half 2 s later
+        CHECK (b[1300] < 0.1f);                                                       // below 10 % by 12 s
+    }
+    currentTest = "SR baseline figures";                                              // the reported 4.6 s / 13.8 s, from the code
+    CHECK (std::abs (curves[0].t90 - 4.6f) < 0.3f);
+    CHECK (curves[0].t1 > 12.5f && curves[0].t1 < 14.5f);
+
+    currentTest = "SR-05 rhythm";
+    for (int response = 0; response < 3; ++response)
+    {
+        const auto b = backoff (response, 12.0, [] (double t) { return std::fmod (t, 0.5) < 0.05; });   // a 50 ms hit every 0.5 s
+        rhythmMin[response] = 1.0f; rhythmMax[response] = 0.0f;
+        for (size_t i = 800; i < b.size(); ++i) { rhythmMin[response] = std::min (rhythmMin[response], b[i]); rhythmMax[response] = std::max (rhythmMax[response], b[i]); }
+    }
+    CHECK (rhythmMin[0] > 0.95f);                                                     // Held: no breathing
+    CHECK (rhythmMin[1] < 0.70f);                                                     // Fast: breathes between hits
+    CHECK (rhythmMin[2] > rhythmMin[1] && rhythmMax[2] - rhythmMin[2] < 0.15f);       // Organic: steadier, small ripple
+
+    currentTest = "SR-06 switching response is click-free";
+    {
+        Engine e;
+        e.prepare (48000.0);
+        auto c = depth::loud();
+        c.p[kTone] = 0.2f; c.p[kPitch] = 0.1f; c.p[kCouple] = 0.8f; c.room = { 0.9f, 0.6f, 0.5f };
+        Buf tone (48000 * 2);
+        for (size_t i = 0; i < tone.size(); ++i) tone[i] = 0.3f * std::sin (2.0f * kPi * 100.0f * (float) i / 48000.0f);
+        Buf y;
+        for (int seg = 0; seg < 80; ++seg)
+        {
+            c.strikeResponse = seg % 3;
+            c.room.activity = seg % 7 < 3 ? 0.8f : 0.0f;
+            Buf l (1200), r (1200);
+            e.process (tone.data() + seg * 1200, tone.data() + seg * 1200, tone.data() + seg * 1200, l.data(), r.data(), 1200, c);
+            y.insert (y.end(), l.begin(), l.end());
+        }
+        float step = 0;
+        for (size_t i = 1; i < y.size(); ++i) step = std::max (step, std::abs (y[i] - y[i - 1]));
+        CHECK (step < 0.03f);
+    }
+}
+
+void report()
+{
+    std::printf ("\nSTRIKE back-off after one second of activity (COUPLE 1, depth +100 %%), seconds after it ends\n%-20s %10s %8s %8s %8s %8s   %s\n",
+                 "response", "rise to 90%", "<90%", "<50%", "<10%", "<1%", "hit every 0.5 s: back-off range");
+    for (int i = 0; i < 3; ++i)
+        std::printf ("%-20s %10.2f %8.2f %8.2f %8.2f %8.2f   %.0f %% .. %.0f %%\n", names[i], (double) curves[i].swell90, (double) curves[i].t90, (double) curves[i].t50, (double) curves[i].t10,
+                     (double) curves[i].t1, (double) rhythmMin[i] * 100.0, (double) rhythmMax[i] * 100.0);
+}
+} // namespace strike
+
 // ---- informational: what the control states do to level and brightness. Proxies only; nobody has listened to these.
 void metrics()
 {
@@ -1211,6 +1339,7 @@ void metrics()
         std::printf ("%-34s %8.1f %8.1f %8.1f %10.0f\n", s.name, 20 * std::log10 (r + 1e-9f), 20 * std::log10 (p + 1e-9f), 20 * std::log10 (p / (r + 1e-9f)), 0.5 * zc / 8.0);
     }
 
+    strike::report();
     std::printf ("\nTuner static at the default STATIC setting: %.1f dBFS RMS at the engine's radio input (48 kHz)\n", (double) tuner::staticDb);
     std::printf ("\nSTRIKE correction, default patch vs the frozen P0 engine (local test source, 8 s): difference %.1f dB relative to P0, level change %+.2f dB\n",
                  (double) depth::strikeDefaultDifferenceDb, (double) depth::strikeDefaultLevelDb);
@@ -1248,6 +1377,7 @@ int main (int argc, char** argv)
     testNoAllocation();
     depth::all();
     tuner::all();
+    strike::all();
     if (argc > 1 && std::strcmp (argv[1], "--metrics") == 0) metrics();
     std::printf ("%d checks, %d failed\n", checks, failures);
     return failures;

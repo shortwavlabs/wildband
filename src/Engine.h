@@ -209,6 +209,7 @@ struct Controls
     float detune = 0.0f;   // Dial::offCentre
     float gap = 0.0f;      // Radio::tuneGap: 0 = the station is playing, 1 = the receiver is fetching the one just asked for
     int request = 0;       // Radio::request: changes with every station request, so each one gets its own static
+    int strikeResponse = 0;   // LAB comparison (docs/p0/STRIKE-RESPONSE.md): 0 = Held (the existing behaviour), 1 = Fast, 2 = Organic
     EnvFrame room;         // EnvBus::read
     RoutingPlan plan = RoutingPlan::fromGraph (Graph::defaultPatch());
 };
@@ -234,6 +235,10 @@ public:
         gapSeconds = 0.0f;
         staticMuted = false;
         strikeRelease = (float) std::exp (-1.0 / (2.0 * fs / kControlInterval));
+        strikeReleaseFast = (float) std::exp (-1.0 / (0.25 * fs / kControlInterval));
+        strikeReleaseOrganic = (float) std::exp (-1.0 / (1.5 * fs / kControlInterval));
+        aEaseUp = onePoleCoeff (0.35, fs / kControlInterval);
+        aEaseDown = onePoleCoeff (1.2, fs / kControlInterval);
         aDc = onePoleCoeff (1.0 / (2.0 * kPi * 5.0), fs);
         aFast = onePoleCoeff (0.002, fs); aFastRel = onePoleCoeff (0.06, fs); aSlow = onePoleCoeff (0.3, fs);
         reset();
@@ -256,7 +261,7 @@ public:
         lp = {}; dc = {}; svfA = {}; svfB = {}; refLp = {};
         w = refW = 0; tick = 0; ringPhase = refLfo = 0.0f; rFast = rSlow = 0.0f;
         mod = {};
-        strikeSeen = 0.0f;
+        strikeSeen = strikeEase = 0.0f;
         for (int i = 0; i < kLines; ++i) driftPhase[(size_t) i] = 0.7f * (float) i;
         first = true;
     }
@@ -369,6 +374,7 @@ public:
     }
 
     float lineFrequency (int i) const noexcept { return freq[(size_t) i]; }
+    float strikeBackoff() const noexcept { return strikePlugged; }     // 0..1: how far the steady excitation is backed off (tests, LAB)
     std::atomic<int> faults { 0 };
     std::atomic<float> meterRadioLevel { 0 }, meterRadioActivity { 0 }, meterOut { 0 }, meterStatic { 0 };
 
@@ -435,9 +441,31 @@ private:
                 // that has actually been active lately: `strikeSeen` follows the source's recent peak (instant up,
                 // about 2 s down) and counts as fully present from 0.1. A source that reads zero has no influence.
                 const float source = plugged ? cv[from - kFirstCvOut] : 0.0f;
-                strikeSeen = std::max (source, strikeSeen * strikeRelease);
-                if (strikeSeen < 1.0e-3f) strikeSeen = 0.0f;
-                strikePlugged += aMod * (std::max (0.0f, depth) * std::min (1.0f, strikeSeen * 10.0f) - strikePlugged);
+                float presence;
+                if (c.strikeResponse == 1)            // B, Fast: short memory, gentle knee - the steady excitation breathes back between hits
+                {
+                    strikeSeen = std::max (source, strikeSeen * strikeReleaseFast);
+                    if (strikeSeen < 1.0e-3f) strikeSeen = 0.0f;
+                    strikeEase = strikeSeen;
+                    presence = std::min (1.0f, strikeSeen * 3.0f);
+                }
+                else if (c.strikeResponse == 2)       // C, Organic: swells in, eases out, no hard edge
+                {
+                    strikeSeen = std::max (source, strikeSeen * strikeReleaseOrganic);
+                    if (strikeSeen < 1.0e-3f) strikeSeen = 0.0f;
+                    const float target = std::min (1.0f, strikeSeen * 3.0f);
+                    strikeEase += (target > strikeEase ? aEaseUp : aEaseDown) * (target - strikeEase);
+                    if (strikeEase < 1.0e-4f && target == 0.0f) strikeEase = 0.0f;
+                    presence = strikeEase * strikeEase * (3.0f - 2.0f * strikeEase);
+                }
+                else                                  // A, Held: the existing behaviour, unchanged
+                {
+                    strikeSeen = std::max (source, strikeSeen * strikeRelease);
+                    if (strikeSeen < 1.0e-3f) strikeSeen = 0.0f;
+                    strikeEase = std::min (1.0f, strikeSeen);
+                    presence = std::min (1.0f, strikeSeen * 10.0f);
+                }
+                strikePlugged += aMod * (std::max (0.0f, depth) * presence - strikePlugged);
             }
         }
         auto cvIn = [this] (int in) { return mod[(size_t) (in - kFirstInput)]; };
@@ -522,6 +550,7 @@ private:
     int lastRequest = 0;
     bool staticMuted = false;
     float srcW[2] = {}, srcT[2] = {}, strikePlugged = 0, strikeSeen = 0, strikeRelease = 0, aMod = 0;
+    float strikeEase = 0, strikeReleaseFast = 0, strikeReleaseOrganic = 0, aEaseUp = 0, aEaseDown = 0;
     float aParam = 0, aFreq = 0, aMode = 0, aDc = 0, aFast = 0, aFastRel = 0, aSlow = 0;
 };
 
