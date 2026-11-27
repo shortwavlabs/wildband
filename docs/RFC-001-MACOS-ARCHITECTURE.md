@@ -22,6 +22,7 @@ All network, parsing, codec negotiation, sensor discovery, permissions and graph
 
 ## Sources
 
+- **Worldwide catalog / sets (post-P0):** [WORLD-RADIO-CATALOG.md](WORLD-RADIO-CATALOG.md) defines a Radio Browser discovery adapter, six ordered preset slots, two independent live stream workers maximum per instance, bounded cache, source validation, migration and per-receiver audio/CV. Directory lookup and stream transport remain distinct services, off the callback; no third preview/prebuffer session. No change to P0 acceptance.
 - **Internet radio:** validate direct stream URL handling for common HTTP Icecast/Shoutcast deployments and relevant MP3/AAC/Opus/Ogg variants individually. Playlist indirection, redirects, HTTPS, metadata, station failures, buffering jitter and format changes need testing. A URL is not guaranteed to decode. Do not rely on a vendor-operated proxy.
 - **Microphone:** explicit system permission. Analyze audio activity locally and default to control features (RMS, onset, spectral centroid) instead of automatically routing raw microphone audio to speakers.
 - **Weather:** optional, low-rate, stale-tolerant source; no mandatory API key or dependency for performance.
