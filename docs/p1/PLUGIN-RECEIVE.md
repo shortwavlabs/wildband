@@ -79,3 +79,21 @@ Bundle (`wildband_plugin_check` + counting server; both formats):
 | RX-21 | Unchanged: `auval` succeeds (its network evidence still proves nothing, see PR #17); frozen parameter order; the general headless checks |
 
 Not established by any of this: what Logic and Live do; how the temporary editor feels.
+
+## Results (2026-11-27, this branch, Apple Silicon, macOS 26)
+
+Commands: `build/wildband_tests`, `tools/run_plugin_lifecycle_check.sh build`, `tools/run_plugin_lifecycle_check.sh
+--control <PR #17 WILDBAND.vst3> build` (with the PR #17 AU installed), `build/.../wildband_plugin_check vst3=...`,
+`tools/run_tuner_check.sh build`.
+
+| Check | Result |
+|---|---|
+| RX-01..RX-06 | pass (part of 949 engine checks, 0 failed) |
+| RX-11 positive control (PR #17 build, same scenario) | VST3 1 connection, AU 1 connection: the scenario detects a build that connects without RECEIVE |
+| RX-10..RX-20, VST3 and AU | 36 of 36 pass (docs/p1/evidence/plugin-receive-check.txt). RX-11: 0 connections over 10 s of real-time rendering with notes played. RX-12: first connection 0.02-0.03 s after the gesture. RX-13: closed 5.3 s after callbacks stopped, reconnected on resume with no gesture. RX-16 restore took < 1 ms and closed the stream. RX-17 off / restore / destroy mid-connect: no later connection, destroy < 10 ms. RX-19: one connection per receiving instance, destroying one closed only its own |
+| RX-21 | auval: AU VALIDATION SUCCEEDED; 0 connections counted, 0 remote TCP seen. As in PR #17 this zero proves nothing: auval pumps no message loop, so the timer that makes requests never runs there |
+| General headless checks | 24 of 24 (frozen order in both formats). The 6 s real-time check now makes the RECEIVE gesture and then reaches the default (real) stations |
+| Tuner real-time checks | 28 of 28, including RL-23 (resume is not a retune) |
+
+Not established: behaviour in Logic, Live or any other DAW; how the temporary editor and LEARN feel in use; VST3
+validator; signing and notarisation; whether a host under App Transport Security allows the plain-http stations.

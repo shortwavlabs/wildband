@@ -4,7 +4,7 @@
 // `wildband_tests --metrics` also prints level/brightness figures for a few control states (proxies, not listening).
 #include "../src/Engine.h"
 #include "baseline/Engine.h"
-#include "../src/ReceiverGate.h"   // the auditioned engine, frozen: reference for depth +100 %
+#include "../src/ReceiverControl.h"   // the auditioned engine, frozen: reference for depth +100 %
 
 #include <cstdio>
 #include <cstring>
@@ -1672,142 +1672,125 @@ void all()
 
 
 // =====================================================================================================================
-// Plugin receiver gate: docs/p1/PLUGIN-RECEIVER-LIFECYCLE.md
-namespace gateTests
+// Plugin RECEIVE control: docs/p1/PLUGIN-RECEIVE.md
+namespace receiveTests
 {
-using G = ReceiverGate;
-/** Feeds the gate a scenario: `audioPerWall` seconds of audio per wall second (0 = no callbacks), sampled at 30 Hz. */
-G::State drive (G& g, double& now, double& rendered, double& lastCb, double seconds, double audioPerWall, bool offline = false)
+using R = ReceiverControl;
+struct Host
 {
-    G::State s = g.current();
-    for (double t = 0; t < seconds; t += 1.0 / 30.0)
+    R::HostSnapshot h;
+    double now = 100;
+    /** `seconds` of host behaviour: callbacks at 30 Hz if `calling`. */
+    void run (R& r, double seconds, bool calling)
     {
-        now += 1.0 / 30.0;
-        if (audioPerWall > 0) { rendered += audioPerWall / 30.0; lastCb = now; }
-        s = g.update (now, rendered, lastCb, offline);
+        for (double t = 0; t < seconds; t += 1.0 / 30.0) { now += 1.0 / 30.0; if (calling) h.lastCallback = now; r.updateHost (now, h); }
     }
-    return s;
-}
+};
 
 void all()
 {
-    currentTest = "RL-01 construction, prepare and restore never activate";
+    currentTest = "RX-01 nothing authorises a connection by itself";
     {
-        G g;
-        double now = 100, rendered = 0, last = -1;
-        CHECK (g.current() == G::State::Dormant);
-        CHECK (drive (g, now, rendered, last, 10, 0) == G::State::Dormant);
-        CHECK (drive (g, now, rendered, last, 10, 1.0) == G::State::Dormant);      // even rendering does nothing before prepare
-        g.prepared (false);
-        CHECK (g.current() == G::State::Armed);
-        last = -1;
-        CHECK (drive (g, now, rendered, last, 10, 0) == G::State::Armed);           // prepared, but nothing rendered
+        R r;
+        Host host;
+        CHECK (! r.shouldConnect (0) && ! r.shouldConnect (1));
+        host.h.prepared = true;
+        host.run (r, 30, true);                                                      // a monitored project, half a minute
+        CHECK (r.hostLive() && ! r.shouldConnect (0) && ! r.shouldConnect (1));
+        r.revokeAll();                                                               // (restore)
+        CHECK (! r.shouldConnect (0));
     }
-    currentTest = "RL-02 faster than real time never activates";
-    for (double speed : { 2.5, 10.0, 1000.0 })
+    currentTest = "RX-02 authorised while the host plays: connect at once";
     {
-        G g;
-        g.prepared (false);
-        double now = 100, rendered = 0, last = -1;
-        CHECK (drive (g, now, rendered, last, 20, speed) == G::State::Armed);
+        R r;
+        Host host;
+        host.h.prepared = true;
+        host.run (r, 0.1, true);
+        r.setReceive (0, true);
+        CHECK (r.shouldConnect (0));                                                 // no waiting window
+        R q;                                                                         // authorised first, host later
+        q.setReceive (0, true);
+        CHECK (! q.shouldConnect (0));
+        Host h2;
+        h2.h.prepared = true;
+        h2.run (q, 0.04, true);
+        CHECK (q.shouldConnect (0));
     }
-    currentTest = "RL-03 real time: 1.4 s is not enough, 1.6 s is";
+    currentTest = "RX-03 suspension keeps intent; resume reconnects";
     {
-        G g;
-        g.prepared (false);
-        double now = 100, rendered = 0, last = -1;
-        CHECK (drive (g, now, rendered, last, 1.4, 1.0) == G::State::Armed);
-        CHECK (drive (g, now, rendered, last, 0.25, 1.0) == G::State::Active);
-        G slow;                                                                    // a busy host running a little late still counts
-        slow.prepared (false);
-        double n2 = 100, r2 = 0, l2 = -1;
-        CHECK (drive (slow, n2, r2, l2, 1.7, 0.7) == G::State::Active);
+        R r;
+        Host host;
+        host.h.prepared = true;
+        host.run (r, 1, true);
+        r.setReceive (0, true);
+        host.run (r, 4.9, false);
+        CHECK (r.shouldConnect (0));                                                 // a short pause in callbacks: still live
+        host.run (r, 0.2, false);
+        CHECK (! r.shouldConnect (0) && r.receiving (0));                            // suspended, intent kept
+        host.run (r, 0.1, true);
+        CHECK (r.shouldConnect (0));                                                 // callbacks back: reconnect
+        host.h.prepared = false;                                                     // release...
+        host.h.releasedAt = host.now;
+        host.run (r, 0.3, false);
+        CHECK (r.shouldConnect (0));                                                 // ...within the grace period
+        host.run (r, 0.3, false);
+        CHECK (! r.shouldConnect (0) && r.receiving (0));
+        host.h.prepared = true;
+        host.run (r, 0.1, true);
+        CHECK (r.shouldConnect (0));
     }
-    currentTest = "RL-04 a gap restarts the window";
+    currentTest = "RX-04 revocation from every cause";
     {
-        G g;
-        g.prepared (false);
-        double now = 100, rendered = 0, last = -1;
-        drive (g, now, rendered, last, 1.0, 1.0);
-        drive (g, now, rendered, last, 0.6, 0.0);                                    // 0.6 s without callbacks
-        CHECK (drive (g, now, rendered, last, 1.0, 1.0) == G::State::Armed);        // only 1 s since the gap
-        CHECK (drive (g, now, rendered, last, 0.6, 1.0) == G::State::Active);
+        R r;
+        Host host;
+        host.h.prepared = true;
+        host.run (r, 1, true);
+        r.setReceive (0, true);
+        r.setReceive (0, false);
+        CHECK (! r.shouldConnect (0));
+        r.toggleReceive (0);
+        CHECK (r.shouldConnect (0));
+        r.toggleReceive (0);
+        CHECK (! r.shouldConnect (0));
+        r.setReceive (0, true);
+        r.setReceive (1, true);
+        r.revokeAll();                                                               // restore / destruction / PANIC
+        CHECK (! r.receiving (0) && ! r.receiving (1));
+        host.run (r, 10, true);
+        CHECK (! r.shouldConnect (0));                                               // and nothing brings it back
     }
-    currentTest = "RL-05 offline rendering never activates, and suspends";
+    currentTest = "RX-05 offline never connects";
     {
-        G g;
-        g.prepared (true);
-        double now = 100, rendered = 0, last = -1;
-        CHECK (drive (g, now, rendered, last, 10, 1.0, true) == G::State::Dormant);
-        G h;
-        h.prepared (false);
-        double n2 = 100, r2 = 0, l2 = -1;
-        CHECK (drive (h, n2, r2, l2, 2, 1.0) == G::State::Active);
-        CHECK (drive (h, n2, r2, l2, 0.1, 1.0, true) == G::State::Suspended);       // host switches to offline
-        CHECK (drive (h, n2, r2, l2, 10, 1.0, true) == G::State::Suspended);
+        R r;
+        Host host;
+        host.h.prepared = true;
+        host.h.offline = true;
+        r.setReceive (0, true);
+        host.run (r, 10, true);
+        CHECK (! r.shouldConnect (0));
+        host.h.offline = false;                                                      // back to real time
+        host.run (r, 0.1, true);
+        CHECK (r.shouldConnect (0));
+        host.h.offline = true;
+        host.run (r, 0.04, true);
+        CHECK (! r.shouldConnect (0) && r.receiving (0));
     }
-    currentTest = "RL-06 silence from the host suspends; only real-time audio resumes";
+    currentTest = "RX-06 receivers are independent";
     {
-        G g;
-        g.prepared (false);
-        double now = 100, rendered = 0, last = -1;
-        drive (g, now, rendered, last, 2, 1.0);
-        CHECK (drive (g, now, rendered, last, 4.9, 0.0) == G::State::Active);
-        CHECK (drive (g, now, rendered, last, 0.2, 0.0) == G::State::Suspended);
-        CHECK (drive (g, now, rendered, last, 5, 50.0) == G::State::Suspended);    // fast rendering does not resume it
-        // a window that began during the fast phase is discarded first, so resuming can take up to two windows
-        CHECK (drive (g, now, rendered, last, 1.4, 1.0) == G::State::Suspended);
-        CHECK (drive (g, now, rendered, last, 1.8, 1.0) == G::State::Active);
-    }
-    currentTest = "RL-08 prepared for offline: stays dormant until a real-time prepare";
-    {
-        G g;
-        g.prepared (true);
-        double now = 100, rendered = 0, last = -1;
-        CHECK (drive (g, now, rendered, last, 5, 1.0) == G::State::Dormant);       // even if it is then fed in real time
-        g.prepared (false);
-        CHECK (drive (g, now, rendered, last, 1.7, 1.0) == G::State::Active);
-    }
-    currentTest = "RL-09 a re-prepare while active stays active";
-    {
-        G g;
-        g.prepared (false);
-        double now = 100, rendered = 0, last = -1;
-        drive (g, now, rendered, last, 2, 1.0);
-        g.prepared (false);
-        CHECK (g.current() == G::State::Active);
-        CHECK (drive (g, now, rendered, last, 1, 1.0) == G::State::Active);
-    }
-    currentTest = "RL-07 release goes dormant within the 0.5 s grace period";
-    {
-        G g;
-        g.prepared (false);
-        double now = 100, rendered = 0, last = -1;
-        drive (g, now, rendered, last, 2, 1.0);
-        g.released (now);
-        CHECK (drive (g, now, rendered, last, 0.4, 0.0) == G::State::Active);
-        CHECK (drive (g, now, rendered, last, 0.2, 0.0) == G::State::Dormant);
-        CHECK (drive (g, now, rendered, last, 5, 1.0) == G::State::Dormant);
-        G h;                                                                     // release when not active: at once
-        h.prepared (false);
-        h.released (now);
-        CHECK (h.current() == G::State::Dormant);
-    }
-    currentTest = "RL-07b release + prepare back to back (a host re-initialising) stays active";
-    {
-        G g;
-        g.prepared (false);
-        double now = 100, rendered = 0, last = -1;
-        drive (g, now, rendered, last, 2, 1.0);
-        g.released (now);
-        g.prepared (false);
-        CHECK (drive (g, now, rendered, last, 2, 1.0) == G::State::Active);
-        g.released (now);
-        g.prepared (true);                                                       // ...but not into offline rendering
-        CHECK (g.current() == G::State::Dormant);
+        R r;
+        Host host;
+        host.h.prepared = true;
+        host.run (r, 1, true);
+        r.setReceive (1, true);
+        CHECK (! r.shouldConnect (0) && r.shouldConnect (1));
+        r.setReceive (0, true);
+        r.setReceive (1, false);
+        CHECK (r.shouldConnect (0) && ! r.shouldConnect (1));
+        r.setReceive (7, true);                                                      // out of range: ignored
+        CHECK (! r.receiving (7));
     }
 }
-} // namespace gateTests
+} // namespace receiveTests
 
 // ---- informational: what the control states do to level and brightness. Proxies only; nobody has listened to these.
 void metrics()
@@ -1882,7 +1865,7 @@ int main (int argc, char** argv)
     tuner::all();
     strike::all();
     voice::all();
-    gateTests::all();
+    receiveTests::all();
    #if WILDBAND_HAS_RINGS
     ringsTests::all();
    #endif

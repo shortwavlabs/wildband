@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2026 Stephane P. Pericat
 //
-// WILDBAND as a plugin (AU, VST3): first proof of the shared architecture, docs/p1/PLUGIN-ARCHITECTURE.md.
-// A thin juce::AudioProcessor around the same Instrument the standalone uses. The host owns the audio device, MIDI
-// and state. An instrument: no audio input. No custom editor yet (the host shows its generic one), no ROOM, no patch
-// bay state. This binary declares no microphone use and contains no capture path.
-// The radio receiver only touches the network once the plugin is genuinely being played in real time - never while
-// a host scans, validates, loads or restores it, nor during offline renders: docs/p1/PLUGIN-RECEIVER-LIFECYCLE.md
+// WILDBAND as a plugin (AU, VST3): docs/p1/PLUGIN-ARCHITECTURE.md. A thin juce::AudioProcessor around the same
+// Instrument the standalone uses. The host owns the audio device, MIDI and state. An instrument: no audio input. No
+// ROOM, no patch bay state. This binary declares no microphone use and contains no capture path.
+//
+// The radio receiver touches the network only after an explicit RECEIVE - the editor's button, or a MIDI control the
+// user mapped to it - and only while the host processes in real time. RECEIVE is runtime state: off at construction,
+// never saved or restored, revoked by RECEIVE off, state restore, destruction and PANIC. docs/p1/PLUGIN-RECEIVE.md
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "Instrument.h"
-#include "ReceiverGate.h"
+#include "ReceiverControl.h"
 
 namespace wildband
 {
@@ -24,6 +25,7 @@ public:
         // contract with saved projects and automation. AU hosts see them sorted by hashed ID (JUCE's AU wrapper), and
         // Logic addresses them by that index: the hosted order is frozen by tools/PluginCheck.cpp. Never rename,
         // remove or re-hint one; a parameter added later gets version hint 2 (or higher) so it sorts after these.
+        // RECEIVE is deliberately NOT a host parameter: a parameter would be saved, restored and automatable.
         for (int i = 0; i < kNumParams; ++i)
         {
             const float initial = i == kTune ? dialCentre (0, kNumStations) : paramDefaults[i];
@@ -38,23 +40,61 @@ public:
             const auto urls = juce::StringArray::fromTokens (test, ",", "");
             for (int i = 0; i < kNumStations && i < urls.size(); ++i) stations[(size_t) i] = { "test " + juce::String (i + 1), urls[i].trim() };
         }
+        // Test aid (inert unless set): WILDBAND_TEST_RECEIVE_CC=<n> maps controller n to RECEIVE, as if the user had
+        // used LEARN, so a headless harness can make the gesture. It maps; it does not activate.
+        if (const char* cc = std::getenv ("WILDBAND_TEST_RECEIVE_CC")) receiveCc = juce::jlimit (-1, 119, juce::String (cc).getIntValue());
         startTimerHz (30);
     }
+
     ~WildbandProcessor() override
     {
         stopTimer();
-        instrument.radio.tune ({});     // cancel any connection now; Radio's destructor then joins its thread
+        revoke();       // RECEIVE off, stream cancelled now; Radio's destructor then joins its thread
     }
 
-    // ---- audio
+    // ---- RECEIVE. Any thread except the audio thread.
+    void setReceive (bool on)
+    {
+        const juce::ScopedLock sl (receiverLock);
+        control.setReceive (0, on);
+        if (! on) cancelLocked();
+    }
+    bool receiving() const { const juce::ScopedLock sl (receiverLock); return control.receiving (0); }
+    void panic()
+    {
+        instrument.panic = true;        // the engine silences itself on the next audio block
+        revoke();
+    }
+    /** For the editor: what the receiver is doing, in one line. */
+    juce::String receiverStatus() const
+    {
+        const juce::ScopedLock sl (receiverLock);
+        if (! control.receiving (0)) return "RECEIVE off - no network";
+        if (! connected) return "RECEIVE on - waiting for the host to play (no connection)";
+        return juce::String (Radio::name (instrument.radio.state())) + "  " + (tuned >= 0 ? stations[(size_t) tuned].name : juce::String());
+    }
+    void armReceiveLearn() noexcept { learnReceive = true; }
+    bool learningReceive() const noexcept { return learnReceive.load(); }
+    juce::String receiveMapping() const
+    {
+        if (receiveCc.load() >= 0) return "CC " + juce::String (receiveCc.load());
+        if (receiveNote.load() >= 0) return "note " + juce::String (receiveNote.load());
+        return "no MIDI control";
+    }
+
+    // ---- audio. prepare / release may come from any host thread: they only store atomics, which the timer reads.
+    // (lastCallbackMs survives a prepare, so a host re-preparing a live plugin does not look like silence.)
     void prepareToPlay (double sampleRate, int samplesPerBlock) override
     {
         instrument.prepareForHost (sampleRate, samplesPerBlock);
-        renderedSamples = 0;            // (lastCallbackMs is kept: a host re-preparing a live plugin must not look like silence)
-        rate = sampleRate;
-        lifecycle.push ({ Event::Prepared, isNonRealtime() });
+        preparedOffline.store (isNonRealtime());
+        prepared.store (true);
     }
-    void releaseResources() override { lifecycle.push ({ Event::Released, false }); }
+    void releaseResources() override
+    {
+        releasedAtMs.store (juce::Time::getMillisecondCounterHiRes());
+        prepared.store (false);
+    }
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override
     {
         return layouts.getMainInputChannelSet().isDisabled() && layouts.getMainOutputChannelSet() == juce::AudioChannelSet::stereo();
@@ -70,12 +110,15 @@ public:
                 instrument.params[(size_t) i].store (v, std::memory_order_relaxed);
             }
         }
-        for (const auto meta : midi) instrument.handleIncomingMidiMessage (nullptr, meta.getMessage());
+        for (const auto meta : midi)
+        {
+            const auto m = meta.getMessage();
+            if (receiveMidi (m)) continue;          // RECEIVE learn / toggle and PANIC: requests only, acted on by the timer
+            instrument.handleIncomingMidiMessage (nullptr, m);
+        }
         instrument.renderForHost (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), buffer.getNumSamples());
-        // what the receiver gate needs to know (the message thread decides; nothing here touches the network)
-        renderedSamples.store (renderedSamples.load (std::memory_order_relaxed) + buffer.getNumSamples(), std::memory_order_relaxed);
         lastCallbackMs.store (juce::Time::getMillisecondCounterHiRes(), std::memory_order_relaxed);
-        nonRealtimeNow.store (isNonRealtime(), std::memory_order_relaxed);
+        offlineNow.store (isNonRealtime(), std::memory_order_relaxed);
     }
 
     // ---- description
@@ -84,8 +127,8 @@ public:
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 10.0; }
-    bool hasEditor() const override { return false; }
-    juce::AudioProcessorEditor* createEditor() override { return nullptr; }
+    bool hasEditor() const override { return true; }
+    juce::AudioProcessorEditor* createEditor() override;
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
     void setCurrentProgram (int) override {}
@@ -93,17 +136,20 @@ public:
     void changeProgramName (int, const juce::String&) override {}
 
     // ---- state: settings only. No audio is ever stored (and there is none to store). The host parameters are the
-    // record: they are what the host automated and what MIDI learn has been mirrored into (timerCallback), and they
-    // are current even if the host saves without having called processBlock since the last change.
+    // record: they are what the host automated and what MIDI learn has been mirrored into (timerCallback). The RECEIVE
+    // MIDI mapping is configuration and is saved; RECEIVE itself never is.
     void getStateInformation (juce::MemoryBlock& destination) override
     {
         juce::XmlElement xml ("WILDBAND");
         xml.setAttribute ("version", 1);
         for (int i = 0; i < kNumParams; ++i) xml.setAttribute (juce::String (paramNames[i]).toLowerCase(), (double) hostParams[(size_t) i]->get());
+        xml.setAttribute ("receiveCc", receiveCc.load());
+        xml.setAttribute ("receiveNote", receiveNote.load());
         copyXmlToBinary (xml, destination);
     }
     void setStateInformation (const void* data, int size) override
     {
+        revoke();       // restoring a state always turns RECEIVE off and cancels any request, including one in flight
         const auto xml = getXmlFromBinary (data, size);
         if (xml == nullptr || ! xml->hasTagName ("WILDBAND")) return;
         for (int i = 0; i < kNumParams; ++i)
@@ -115,25 +161,56 @@ public:
             lastHost[(size_t) i] = v;
             hostParams[(size_t) i]->setValueNotifyingHost (v);   // range is 0..1, so normalised = plain
         }
+        if (xml->hasAttribute ("receiveCc")) receiveCc = juce::jlimit (-1, 119, xml->getIntAttribute ("receiveCc", -1));
+        if (xml->hasAttribute ("receiveNote")) receiveNote = juce::jlimit (-1, 127, xml->getIntAttribute ("receiveNote", -1));
     }
 
     Instrument instrument;      // public for the headless check
 
 private:
-    /** Message thread. The station follows TUNE once it has rested for a quarter of a second, as in the standalone;
-        Radio::tune takes a lock, so it is never called from processBlock. */
+    // ---- audio thread: RECEIVE learn, a mapped control's press, and PANIC (CC 120, All Sound Off). Requests only.
+    bool receiveMidi (const juce::MidiMessage& m) noexcept
+    {
+        if (m.isController() && m.getControllerNumber() == 120) { panicRequests.fetch_add (1, std::memory_order_relaxed); return true; }
+        if (learnReceive.load (std::memory_order_relaxed) && (m.isController() || m.isNoteOn()))
+        {
+            receiveCc.store (m.isController() ? m.getControllerNumber() : -1);
+            receiveNote.store (m.isNoteOn() ? m.getNoteNumber() : -1);
+            lastReceiveCcValue = 127;               // the move that taught it does not also toggle it
+            learnReceive.store (false);
+            return true;
+        }
+        if (m.isController() && m.getControllerNumber() == receiveCc.load (std::memory_order_relaxed))
+        {
+            const int v = m.getControllerValue();
+            if (v >= 64 && lastReceiveCcValue < 64) toggleRequests.fetch_add (1, std::memory_order_relaxed);
+            lastReceiveCcValue = v;
+            return true;
+        }
+        if (m.isNoteOn() && m.getNoteNumber() == receiveNote.load (std::memory_order_relaxed)) { toggleRequests.fetch_add (1, std::memory_order_relaxed); return true; }
+        if (m.isNoteOff() && m.getNoteNumber() == receiveNote.load (std::memory_order_relaxed)) return true;
+        return false;
+    }
+
+    void revoke()
+    {
+        const juce::ScopedLock sl (receiverLock);
+        control.revokeAll();
+        cancelLocked();
+    }
+    void cancelLocked()          // receiverLock held
+    {
+        if (connected) instrument.radio.resume ({});
+        connected = false;
+        tuned = -1;
+    }
+
+    /** Message thread, 30 Hz. Decides, under receiverLock, whether the receiver holds a connection; issues the station
+        requests. Radio::tune / resume take Radio's own lock and are never called from processBlock. */
     void timerCallback() override
     {
-        // ---- receiver lifecycle (docs/p1/PLUGIN-RECEIVER-LIFECYCLE.md)
-        const bool wasActive = gate.active();            // before release/prepare events can change it
-        Event e;
-        const double nowS = juce::Time::getMillisecondCounterHiRes() / 1000.0, lastS = lastCallbackMs.load() / 1000.0;
-        while (lifecycle.pop (e)) { if (e.type == Event::Prepared) gate.prepared (e.nonRealtime); else gate.released (nowS); }
-        gate.update (nowS, (double) renderedSamples.load() / rate, lastS, nonRealtimeNow.load());
-        if (wasActive && ! gate.active()) { instrument.radio.resume ({}); if (tuned >= 0) suspendedStation = tuned; tuned = -1; }   // suspend / release: cancel the stream
-
-        // A knob moved by MIDI learn (the instrument's own controller map) is mirrored into its host parameter, so the
-        // host sees it and saves it - unless the host has moved that parameter itself since processBlock last looked.
+        // a knob moved by MIDI learn (the instrument's own controller map) is mirrored into its host parameter, so the
+        // host sees it and saves it - unless the host has moved that parameter itself since processBlock last looked
         for (int i = 0; i < kNumParams; ++i)
         {
             const float mine = instrument.params[(size_t) i].load(), host = hostParams[(size_t) i]->get();
@@ -144,49 +221,117 @@ private:
             }
         }
 
-        if (! gate.active()) return;                     // not being played in real time: no station request, no network
+        if (panicRequests.exchange (0) > 0) panic();
+        const juce::ScopedLock sl (receiverLock);
+        if ((toggleRequests.exchange (0) & 1) != 0) control.toggleReceive (0);
+
+        ReceiverControl::HostSnapshot h;
+        h.prepared = prepared.load();
+        h.offline = preparedOffline.load() || offlineNow.load();
+        h.lastCallback = lastCallbackMs.load() / 1000.0;
+        h.releasedAt = releasedAtMs.load() / 1000.0;
+        control.updateHost (juce::Time::getMillisecondCounterHiRes() / 1000.0, h);
+
+        const bool want = control.shouldConnect (0);
+        if (! want) { if (connected) cancelLocked(); return; }
+
         const int wantedNow = dial (instrument.params[kTune].load(), kNumStations).station;
         const auto now = juce::Time::getMillisecondCounter();
-        if (wantedNow != wanted) { wanted = wantedNow; wantedSince = now; }
-        if (wanted != tuned && now - wantedSince > 250)
+        if (! connected)
         {
-            // Coming back to the station that was playing before a suspension, a release or construction is not a retune:
-            // it buffers silently. Moving TUNE to another station while live is one, with tuner static.
-            const bool resuming = wanted == suspendedStation || suspendedStation == kNever;
+            // RECEIVE was just granted, or the host has come back: connect at once to the station under TUNE. Not a
+            // retune, so it buffers without tuner static.
+            tuned = wanted = wantedNow;
+            wantedSince = now;
+            connected = true;
+            instrument.radio.resume (stations[(size_t) tuned].url);
+            return;
+        }
+        if (wantedNow != wanted) { wanted = wantedNow; wantedSince = now; }
+        if (wanted != tuned && now - wantedSince > 250)    // TUNE moved to another station and rested: a deliberate retune, with static
+        {
             tuned = wanted;
-            suspendedStation = -1;
-            if (resuming) instrument.radio.resume (stations[(size_t) tuned].url);
-            else instrument.radio.tune (stations[(size_t) tuned].url);
+            instrument.radio.tune (stations[(size_t) tuned].url);
         }
     }
 
-    // audio thread -> message thread, for the receiver gate
-    std::atomic<juce::int64> renderedSamples { 0 };
-    std::atomic<double> lastCallbackMs { -1.0 };
-    std::atomic<bool> nonRealtimeNow { false };
-    double rate = 48000.0;
-    struct Event { enum Type { Prepared, Released } type = Prepared; bool nonRealtime = false; };
-    struct EventQueue   // prepare/release may come from any host thread; the timer drains it. Bounded; a full queue keeps the newest
-    {
-        void push (Event e) noexcept { const juce::SpinLock::ScopedLockType l (lock); if (count == 8) { head = (head + 1) % 8; --count; } items[(head + count++) % 8] = e; }
-        bool pop (Event& e) noexcept { const juce::SpinLock::ScopedLockType l (lock); if (count == 0) return false; e = items[head]; head = (head + 1) % 8; --count; return true; }
-        juce::SpinLock lock; Event items[8]; int head = 0, count = 0;
-    } lifecycle;
-    ReceiverGate gate;
+    // host threads / audio thread -> timer (atomics only)
+    std::atomic<bool> prepared { false }, preparedOffline { false }, offlineNow { false };
+    std::atomic<double> lastCallbackMs { -1.0 }, releasedAtMs { -1.0 };
+    std::atomic<int> toggleRequests { 0 }, panicRequests { 0 };
+    std::atomic<int> receiveCc { -1 }, receiveNote { -1 };
+    std::atomic<bool> learnReceive { false };
+    int lastReceiveCcValue = 0;                         // audio thread only
 
-public:
-    const char* receiverState() const noexcept { return ReceiverGate::name (gate.current()); }   // for the headless check
+    // receiver decision state: under receiverLock (never taken by the audio thread)
+    juce::CriticalSection receiverLock;
+    ReceiverControl control;
+    bool connected = false;
+    int wanted = -1, tuned = -1;
+    juce::uint32 wantedSince = 0;
 
-private:
     std::array<juce::AudioParameterFloat*, kNumParams> hostParams {};
     std::array<std::atomic<float>, kNumParams> lastHost {};
     std::array<Station, kNumStations> stations;
-    static constexpr int kNever = -2;     // never connected yet: the first connection is a start, not a retune
-    int wanted = -1, tuned = -1, suspendedStation = kNever;
-    juce::uint32 wantedSince = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (WildbandProcessor)
 };
+
+// ---- temporary editor: RECEIVE, its MIDI mapping, PANIC and a status line. Not the instrument's design.
+class WildbandEditor final : public juce::AudioProcessorEditor, private juce::Timer
+{
+public:
+    explicit WildbandEditor (WildbandProcessor& p) : AudioProcessorEditor (p), owner (p)
+    {
+        receive.setButtonText ("RECEIVE");
+        receive.setClickingTogglesState (true);
+        receive.setColour (juce::TextButton::buttonOnColourId, juce::Colour (0xffF59E0B));
+        receive.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+        receive.setTooltip ("Connect to the station under TUNE. Off whenever the plugin is opened, restored or panicked.");
+        receive.onClick = [this] { owner.setReceive (receive.getToggleState()); };
+        learn.setButtonText ("LEARN");
+        learn.setTooltip ("Then press a button or move a control on your MIDI controller to make it toggle RECEIVE.");
+        learn.onClick = [this] { owner.armReceiveLearn(); };
+        panicButton.setButtonText ("PANIC");
+        panicButton.onClick = [this] { owner.panic(); };
+        for (auto* c : std::initializer_list<juce::Component*> { &receive, &learn, &panicButton, &status, &mapping, &note })
+            addAndMakeVisible (c);
+        note.setText ("Temporary panel. The ten sliders are in the host's parameter view.", juce::dontSendNotification);
+        note.setColour (juce::Label::textColourId, juce::Colours::grey);
+        setSize (460, 150);
+        startTimerHz (10);
+        timerCallback();
+    }
+
+private:
+    void paint (juce::Graphics& g) override { g.fillAll (juce::Colour (0xff0C0A09)); }
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (12);
+        auto row = area.removeFromTop (36);
+        receive.setBounds (row.removeFromLeft (130));
+        row.removeFromLeft (8);
+        learn.setBounds (row.removeFromLeft (80));
+        row.removeFromLeft (8);
+        mapping.setBounds (row.removeFromLeft (120));
+        panicButton.setBounds (row.removeFromRight (80));
+        area.removeFromTop (10);
+        status.setBounds (area.removeFromTop (24));
+        note.setBounds (area.removeFromTop (24));
+    }
+    void timerCallback() override
+    {
+        receive.setToggleState (owner.receiving(), juce::dontSendNotification);   // MIDI, restore and PANIC change it too
+        status.setText (owner.receiverStatus(), juce::dontSendNotification);
+        mapping.setText (owner.learningReceive() ? "move a control..." : owner.receiveMapping(), juce::dontSendNotification);
+    }
+
+    WildbandProcessor& owner;
+    juce::TextButton receive, learn, panicButton;
+    juce::Label status, mapping, note;
+};
+
+juce::AudioProcessorEditor* WildbandProcessor::createEditor() { return new WildbandEditor (*this); }
 
 } // namespace wildband
 

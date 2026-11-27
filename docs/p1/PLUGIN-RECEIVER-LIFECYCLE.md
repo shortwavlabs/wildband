@@ -3,6 +3,9 @@
 **Branch:** `p1/plugin-lifecycle`, on `p1/plugin-proof`. **Status:** contract and acceptance criteria committed before
 the change; results appended at the bottom.
 
+> **Superseded in part** by [PLUGIN-RECEIVE.md](PLUGIN-RECEIVE.md) (`p1/plugin-receive`): real-time rendering no longer
+> authorises a connection; only an explicit RECEIVE does. The evidence below describes the PR #17 build as it was.
+
 ## The defect
 
 The first plugin proof started fetching the default station about 250 ms after the plugin object was **constructed**.
