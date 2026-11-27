@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Local stand-in for awkward radio servers, for the G1 protocol tests (docs/p0/RADIO-COMPATIBILITY.md).
 
-    python3 -I tools/stream_test_server.py clip.mp3 [port]
+    python3 -I tools/stream_test_server.py clip.mp3 [port [clipB.mp3 clipC.mp3]]
 
 Serves the clip in a loop at real-time pace on 127.0.0.1. Paths:
   /live      plain Icecast-style stream            /redirect  302 -> /live
@@ -10,14 +10,18 @@ Serves the clip in a loop at real-time pace on 127.0.0.1. Paths:
   /icy       legacy Shoutcast "ICY 200 OK" status  /missing   404
   /drop      closes after 3 s, every time          /stall     sends 3 s, then goes silent with the socket open
   /meta      ignores "Icy-MetaData: 0" and interleaves metadata anyway (badly behaved server)
+  /a /b /c   three different clips (clip, clipB, clipC), for telling stations apart in the tuner tests
+  /wait/N    waits N seconds before answering, then streams like /live
+  /silent    accepts the connection and never answers
 """
 import socket, sys, threading, time
 
 clip = open(sys.argv[1], 'rb').read()
 port = int(sys.argv[2]) if len(sys.argv) > 2 else 8765
+clips = {'/a': clip, '/b': open(sys.argv[3], 'rb').read() if len(sys.argv) > 3 else clip, '/c': open(sys.argv[4], 'rb').read() if len(sys.argv) > 4 else clip}
 BYTERATE = 16000  # 128 kb/s
 
-def stream(conn, seconds=None, stall=False, meta=False):
+def stream(conn, seconds=None, stall=False, meta=False, clip=clip):
     start, sent, pos = time.time(), 0, 0
     burst = BYTERATE * 2                       # like Icecast: a burst first, then real time
     while True:
@@ -46,6 +50,9 @@ def handle(conn):
         def text(body, ctype):
             conn.sendall(f'HTTP/1.0 200 OK\r\nContent-Type: {ctype}\r\nContent-Length: {len(body)}\r\n\r\n{body}'.encode())
         if path == '/live': head(); stream(conn)
+        elif path in clips: head(); stream(conn, clip=clips[path])
+        elif path.startswith('/wait/'): time.sleep(float(path[6:])); head(); stream(conn)
+        elif path == '/silent': time.sleep(3600)
         elif path == '/redirect': conn.sendall(f'HTTP/1.0 302 Found\r\nLocation: {base}/live\r\n\r\n'.encode())
         elif path == '/list.m3u': text(f'#EXTM3U\n#EXTINF:-1,Local\n{base}/live\n', 'audio/x-mpegurl')
         elif path == '/list.pls': text(f'[playlist]\nNumberOfEntries=1\nFile1={base}/live\nTitle1=Local\n', 'audio/x-scpls')

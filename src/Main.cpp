@@ -24,6 +24,7 @@ juce::Colour moduleColour (int module) { return module == kModRadio ? kRadio : m
 
 bool roomAtStart = false;   // --room (test aid)
 juce::String statusLogPath; // --log=FILE (test aid): one status line every 5 s
+bool navTest = false;       // --nav-test (test aid): NEXT at 12 s, five quick NEXTs at 22 s, PREVIOUS at 32 s
 bool switchTest = false;    // --switch-test (test aid): move the output to the built-in speakers and back while playing
 
 struct Station { juce::String name, url; };
@@ -48,6 +49,7 @@ public:
         for (int i = 0; i < kNumParams; ++i) params[(size_t) i] = paramDefaults[i];
         params[kTune] = dialCentre (0, kNumStations);
         for (auto& c : ccMap) c = -1;      // no controller is mapped until MIDI LEARN maps one: no guessed defaults
+        for (auto& n : noteMap) n = -1;
         plans.publish (RoutingPlan::fromGraph (Graph::defaultPatch()));
     }
 
@@ -56,7 +58,13 @@ public:
     std::atomic<int> mode { 0 };
     PlanMailbox plans;                                      // written by the patch bay (message thread), read by the callback
     std::atomic<bool> roomEnabled { false }, panic { false }, stallOnce { false };   // stallOnce: --measure positive control only
-    std::array<std::atomic<int8_t>, 128> ccMap;             // controller number -> Param, -1 = unmapped
+    // Station navigation can be mapped too. Targets from kNumParams up are actions, not knobs: PREVIOUS, NEXT, then one
+    // per station slot. A controller fires an action when it rises through half way; a mapped note fires it on note-on
+    // (and then no longer sets PITCH). The UI thread performs the action (navSteps / presetRequest).
+    enum Action : int { kActionPrev = kNumParams, kActionNext, kActionPreset, kNumTargets = kActionPreset + kNumStations };
+    std::array<std::atomic<int8_t>, 128> noteMap;           // note number -> Action, -1 = unmapped
+    std::atomic<int> navSteps { 0 }, presetRequest { -1 };
+    std::array<std::atomic<int8_t>, 128> ccMap;             // controller number -> Param or Action, -1 = unmapped
     std::atomic<int> learnTarget { -1 }, midiEvents { 0 };
     std::atomic<bool> mapDirty { false };
     std::atomic<float> roomLevel { 0 }, roomActivity { 0 }, roomBrightness { 0 };
@@ -106,12 +114,14 @@ public:
     {
         const auto t0 = juce::Time::getHighResolutionTicks();
         juce::ScopedNoDenormals noDenormals;
-        if (panic.exchange (false)) engine.reset();
+        if (panic.exchange (false)) engine.panic();      // also silences tuner static for the rest of the current retune
 
         Controls c;
         for (int i = 0; i < kNumParams; ++i) c.p[i] = params[(size_t) i].load (std::memory_order_relaxed);
         c.mode = (Mode) mode.load (std::memory_order_relaxed);
         c.detune = dial (c.p[kTune], kNumStations).offCentre;
+        c.gap = radio.tuneGap.load (std::memory_order_relaxed);   // written by radio.read in the previous block
+        c.request = radio.request();
         c.plan = plans.read();                              // whole plan or the previous whole plan, never a mixture
         const auto nowMs = (int64_t) juce::Time::getMillisecondCounter();
 
@@ -155,23 +165,50 @@ public:
         if (m.isController())
         {
             const auto cc = (size_t) m.getControllerNumber();
+            const int value = m.getControllerValue();
             if (const int target = learnTarget.exchange (-1); target >= 0)
             {
-                for (auto& other : ccMap) if (other.load() == target) other = -1;
+                unmap (target);
                 ccMap[cc] = (int8_t) target;
+                lastCc[cc] = 127;                                   // the move that taught it does not also fire it
                 mapDirty = true;
             }
-            if (const int p = ccMap[cc].load(); p >= 0) params[(size_t) p] = (float) m.getControllerValue() / 127.0f;
+            const int target = ccMap[cc].load();
+            if (target >= kNumParams) { if (value >= 64 && lastCc[cc] < 64) fire (target); }
+            else if (target >= 0) params[(size_t) target] = (float) value / 127.0f;
+            lastCc[cc] = (uint8_t) value;
             midiEvents.fetch_add (1);
         }
         else if (m.isNoteOn())
         {
-            params[kPitch] = clamp01 ((float) (m.getNoteNumber() - 36) / 48.0f);
+            const auto note = (size_t) m.getNoteNumber();
+            if (const int target = learnTarget.load(); target >= kNumParams)      // learning an action: a note may be its trigger
+            {
+                learnTarget = -1;
+                unmap (target);
+                noteMap[note] = (int8_t) target;
+                mapDirty = true;
+            }
+            else if (const int action = noteMap[note].load(); action >= 0) fire (action);
+            else params[kPitch] = clamp01 ((float) ((int) note - 36) / 48.0f);
             midiEvents.fetch_add (1);
         }
     }
 
+    void unmap (int target) noexcept
+    {
+        for (auto& other : ccMap) if (other.load() == target) other = -1;
+        for (auto& other : noteMap) if (other.load() == target) other = -1;
+    }
+
 private:
+    void fire (int action) noexcept          // MIDI thread; the UI timer carries it out
+    {
+        if (action == kActionPrev) navSteps.fetch_sub (1);
+        else if (action == kActionNext) navSteps.fetch_add (1);
+        else if (action >= kActionPreset && action < kNumTargets) presetRequest = action - kActionPreset;
+    }
+    std::array<uint8_t, 128> lastCc {};      // MIDI thread only
     static constexpr int kScratch = 2048;
     EnvBus env;
     TestSource local;
@@ -229,6 +266,11 @@ struct Look final : juce::LookAndFeel_V4
 /** The TUNE dial: station arcs, clean zones and the needle. It shows where the knob is, not a radio frequency. */
 struct StationDial final : juce::Component
 {
+    std::function<void (int)> onPick;        // a station's cell was clicked
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (onPick) onPick (juce::jlimit (0, kNumStations - 1, (int) ((float) e.x / (float) juce::jmax (1, getWidth()) * kNumStations)));
+    }
     std::array<Station, kNumStations> stations;
     float tune = 0;
     int tuned = 0;
@@ -496,6 +538,13 @@ public:
         panicButton.setButtonText ("PANIC");
         panicButton.setTooltip ("Silences the resonators at once");
         panicButton.onClick = [this] { instrument.panic = true; };
+        for (int i = 0; i < 2; ++i)
+        {
+            nav[(size_t) i].setTooltip (i == 0 ? "Previous station" : "Next station");
+            nav[(size_t) i].onClick = [this, i] { navigate (Instrument::kActionPrev + i, ((tuned + (i == 0 ? -1 : 1)) % kNumStations + kNumStations) % kNumStations); };
+            addAndMakeVisible (nav[(size_t) i]);
+        }
+        dialView.onPick = [this] (int slot) { navigate (Instrument::kActionPreset + slot, slot); };
         setUrl.setButtonText ("SET");
         setUrl.onClick = [this] { applyUrl(); };
         urlEditor.onReturnKey = [this] { applyUrl(); };
@@ -608,7 +657,10 @@ public:
         }
 
         area.removeFromTop (4);
-        dialView.setBounds (area.removeFromTop (44));
+        auto strip = area.removeFromTop (44);
+        nav[0].setBounds (strip.removeFromLeft (52).reduced (0, 4));
+        nav[1].setBounds (strip.removeFromRight (52).reduced (0, 4));
+        dialView.setBounds (strip.reduced (4, 0));
         area.removeFromTop (6);
         auto urlRow = area.removeFromTop (26);
         setUrl.setBounds (urlRow.removeFromRight (60));
@@ -685,6 +737,17 @@ private:
         if (d.station != wanted) { wanted = d.station; wantedSince = now; }
         if (wanted != tuned && now - wantedSince > 250) { tuned = wanted; instrument.radio.tune (stations[(size_t) tuned].url); urlEditor.setText (stations[(size_t) tuned].url, false); settingsDirty = true; }
 
+        // PREVIOUS / NEXT / presets from MIDI (the buttons and the dial strip call selectStation directly)
+        if (const int steps = instrument.navSteps.exchange (0); steps != 0) selectStation (((tuned + steps) % kNumStations + kNumStations) % kNumStations);
+        if (const int slot = instrument.presetRequest.exchange (-1); slot >= 0) selectStation (slot);
+        for (int i = 0; i < 2; ++i)
+        {
+            const int target = Instrument::kActionPrev + i;
+            int cc = -1, note = -1;
+            for (int n = 0; n < 128; ++n) { if (instrument.ccMap[(size_t) n].load() == target) cc = n; if (instrument.noteMap[(size_t) n].load() == target) note = n; }
+            nav[(size_t) i].setButtonText (juce::String (i == 0 ? "<" : ">") + (instrument.learnTarget.load() == target ? " ?" : cc >= 0 ? " cc" + juce::String (cc) : note >= 0 ? " n" + juce::String (note) : ""));
+        }
+
         const auto state = instrument.radio.state();
         dialView.stations = stations;
         dialView.tune = instrument.params[kTune].load();
@@ -693,7 +756,8 @@ private:
         dialView.repaint();
         patch.repaint();
 
-        juce::String text = juce::String (Radio::name (state)) + "  " + stations[(size_t) tuned].name;
+        juce::String text = juce::String (wanted != tuned ? "TUNING" : Radio::name (state)) + "  " + stations[(size_t) (wanted != tuned ? wanted : tuned)].name;
+        if (instrument.engine.meterStatic.load() > 0.01f) text << "  |  static (synthesized)";
         if (state == Radio::State::Playing || state == Radio::State::Buffering) text << "  |  " << instrument.radio.detail().upToFirstOccurrenceOf (" - ", false, false) << "  |  buffer " << juce::String (instrument.radio.bufferedSeconds(), 1) << " s";
         else if (instrument.radio.detail().isNotEmpty()) text << "  |  " << instrument.radio.detail();
         if (d.offCentre > 0.0f) text << "  |  off-centre " << juce::roundToInt (d.offCentre * 100.0f) << " %";
@@ -717,13 +781,19 @@ private:
         if (instrument.mapDirty.exchange (false)) { settingsDirty = true; learn.setToggleState (false, juce::dontSendNotification); }
         if (settingsDirty && now - lastSave > 2000) saveSettings();
         if (measurePath.isNotEmpty() && ticks > 8) stepMeasure();
-        if (statusLogPath.isNotEmpty() && ticks % 150 == 0)
+        if (navTest)
+        {
+            if (ticks == 360 || ticks == 960) instrument.navSteps.fetch_add (ticks == 360 ? 1 : -1);            // exactly what a mapped MIDI button does
+            if (ticks >= 660 && ticks < 670 && ticks % 2 == 0) instrument.navSteps.fetch_add (1);                // five presses in a third of a second
+        }
+        if (statusLogPath.isNotEmpty() && (ticks % 150 == 0 || (navTest && ticks % 6 == 0 && instrument.radio.state() != Radio::State::Playing)))
         {
             auto* device = devices.getCurrentAudioDevice();
-            juce::File (statusLogPath).appendText (juce::String (ticks / 30) + " s | " + (device != nullptr ? device->getName() : juce::String ("no device")) + " | " + Radio::name (instrument.radio.state())
+            juce::File (statusLogPath).appendText (juce::String (ticks / 30.0, 1) + " s | " + (device != nullptr ? device->getName() : juce::String ("no device")) + " | " + Radio::name (instrument.radio.state())
                 + " | buffer " + juce::String (instrument.radio.bufferedSeconds(), 1) + " s | underruns " + juce::String (instrument.radio.underruns.load()) + " | reconnects " + juce::String (instrument.radio.reconnects.load())
                 + " | callbacks " + juce::String ((juce::int64) instrument.perf.callbacks.load()) + " | late " + juce::String ((juce::int64) instrument.perf.lateCallbacks.load()) + " | max gap ms " + juce::String (instrument.perf.maxGapMs.load(), 1)
-                + " | faults " + juce::String (instrument.engine.faults.load()) + " | ROOM " + (instrument.roomEnabled.load() ? "on" : "off") + " | " + roomMessage.upToFirstOccurrenceOf (".", false, false) + "\n");
+                + " | faults " + juce::String (instrument.engine.faults.load())
+                + " | " + stations[(size_t) tuned].name + " | gap " + juce::String (instrument.radio.tuneGap.load(), 2) + " | static " + juce::String (instrument.engine.meterStatic.load(), 2) + " | connects " + juce::String (instrument.radio.connects.load()) + " | ROOM " + (instrument.roomEnabled.load() ? "on" : "off") + " | " + roomMessage.upToFirstOccurrenceOf (".", false, false) + "\n");
         }
         if (switchTest && (ticks == 450 || ticks == 900))          // at 15 s and 30 s: the same call the AUDIO dialog makes
         {
@@ -751,6 +821,22 @@ private:
             depthRoute.setColour (juce::Label::textColourId, moduleColour (ports[from].module));
         }
         else if (from >= 0) flash ("Audio cables have no depth. Select a round (control) cable.");
+    }
+
+    /** NEXT / PREVIOUS / a preset: jump straight to a station. The knob follows; the request goes out at once (the
+        receiver itself coalesces a quick run of them into the last one). In MIDI LEARN the control is armed instead. */
+    void selectStation (int slot)
+    {
+        instrument.params[kTune] = dialCentre (slot, kNumStations);
+        wanted = tuned = slot;
+        instrument.radio.tune (stations[(size_t) slot].url);
+        urlEditor.setText (stations[(size_t) slot].url, false);
+        settingsDirty = true;
+    }
+    void navigate (int target, int slot)
+    {
+        if (learn.getToggleState()) { instrument.learnTarget = target; return flash ("Now press the button or pad on your controller for this."); }
+        selectStation (slot);
     }
 
     void flash (const juce::String& m) { hint.setText (m, juce::dontSendNotification); flashUntil = juce::Time::getMillisecondCounter() + 3000; }
@@ -954,6 +1040,11 @@ private:
                 if (const int cc = p.getIntValue (juce::String ("cc") + paramNames[i]); cc >= 0 && cc < 128) instrument.ccMap[(size_t) cc] = (int8_t) i;
             }
         }
+        for (int target = kNumParams; target < Instrument::kNumTargets; ++target)
+        {
+            if (const int cc = p.getIntValue ("ccAction" + juce::String (target - kNumParams), -1); cc >= 0 && cc < 128) instrument.ccMap[(size_t) cc] = (int8_t) target;
+            if (const int note = p.getIntValue ("noteAction" + juce::String (target - kNumParams), -1); note >= 0 && note < 128) instrument.noteMap[(size_t) note] = (int8_t) target;
+        }
         instrument.params[kLevel] = juce::jmin (instrument.params[kLevel].load(), paramDefaults[kLevel]);   // never start loud
         // "cables" stays in P0's format so both builds can share one settings file; depths live under their own key
         if (p.containsKey ("cables")) patch.graph = loadPatch (p.getValue ("cables").toStdString(), p.getValue ("cableDepths").toStdString());
@@ -973,6 +1064,13 @@ private:
             int cc = -1;
             for (int n = 0; n < 128; ++n) if (instrument.ccMap[(size_t) n].load() == i) cc = n;
             p.setValue (juce::String ("cc") + paramNames[i], cc);
+        }
+        for (int target = kNumParams; target < Instrument::kNumTargets; ++target)
+        {
+            int cc = -1, note = -1;
+            for (int n = 0; n < 128; ++n) { if (instrument.ccMap[(size_t) n].load() == target) cc = n; if (instrument.noteMap[(size_t) n].load() == target) note = n; }
+            p.setValue ("ccAction" + juce::String (target - kNumParams), cc);
+            p.setValue ("noteAction" + juce::String (target - kNumParams), note);
         }
         p.setValue ("cables", juce::String (savePatch (patch.graph)));
         p.setValue ("cableDepths", juce::String (savePatch (patch.graph, true)));
@@ -1060,6 +1158,7 @@ private:
     std::array<juce::TextButton, 3> modes;
     juce::ToggleButton roomButton, learn;
     juce::TextButton audioButton, panicButton, setUrl;
+    std::array<juce::TextButton, 2> nav;
     juce::TextEditor urlEditor;
     juce::Label title, status, hint, depthRoute;
     juce::Slider depth;
@@ -1111,6 +1210,7 @@ public:
 
         roomAtStart = commandLine.contains ("--room");
         switchTest = commandLine.contains ("--switch-test");
+        navTest = commandLine.contains ("--nav-test");
         for (const auto& arg : juce::StringArray::fromTokens (commandLine, true))
             if (arg.startsWith ("--log=")) statusLogPath = arg.fromFirstOccurrenceOf ("=", false, false).unquoted();
         juce::String measure;

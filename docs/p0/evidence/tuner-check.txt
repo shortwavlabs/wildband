@@ -1,0 +1,33 @@
+CT-03 static follows the real wait
+  pass  server delay 0 s: LIVE after 0.05 s, static audible for 0.10 s
+  pass    and no static once LIVE (max 0.0000)
+  pass  server delay 1 s: LIVE after 1.03 s, static audible for 1.08 s
+  pass    and no static once LIVE (max 0.0000)
+  pass  server delay 3 s: LIVE after 3.03 s, static audible for 3.08 s
+  pass    and no static once LIVE (max 0.0000)
+CT-04 no added delay
+  pass  STATIC 0: no static at all
+  pass  time to LIVE: 1.02 s with STATIC 0, 1.02 s with STATIC full
+CT-05 failure
+  pass  /missing: FAILED after 0.01 s (HTTP 404); gap closed, static gone within 0.5 s
+  pass  /ogg: FAILED after 0.01 s (unsupported stream type (application/ogg)); gap closed, static gone within 0.5 s
+  pass  refused port: static while trying (max 1.00), ended by 8.5 s (max after: 0.00000); state RECONNECTING, 5 attempts
+CT-06 stall
+  pass  server never answers: static ended by 8.5 s and stayed silent for 10 s of retries (max after: 0.00000); state RECONNECTING, 3 attempts
+CT-17 getting away from a bad station
+  pass  from a server that never answers: LIVE on the next station after 0.03 s
+  pass    with static during that wait (max 0.10)
+  pass  from a refused port: LIVE on the next station after 0.03 s
+  pass    with static during that wait (max 0.10)
+  pass  from a 404: LIVE on the next station after 0.04 s
+  pass    with static during that wait (max 0.18)
+  pass  re-selecting a FAILED station makes one new attempt (1 -> 2), and reports FAILED again
+CT-07 / CT-08 rapid switching and stale audio
+  pass  ends LIVE on the last station (583 blocks of its tone)
+  pass  connection attempts for 51 requests: 2
+  pass  blocks carrying another station's tone after the last request: 0
+CT-10 PANIC during a real wait
+  pass  static rings the engine (peak 0.66), PANIC gives exact silence until the station arrives 2.02 s later, then it plays
+CT-15 spontaneous dropout
+  pass  2 reconnects of a playing station: gap stayed closed, no static (underruns 0)
+24 checks, 0 failed

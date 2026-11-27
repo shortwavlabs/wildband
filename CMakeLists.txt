@@ -63,6 +63,12 @@ target_sources(wildband_radio_probe PRIVATE tools/RadioProbe.cpp src/Radio.cpp)
 target_compile_definitions(wildband_radio_probe PRIVATE ${WILDBAND_DEFS})
 target_link_libraries(wildband_radio_probe PRIVATE juce::juce_core "-framework AudioToolbox" juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 
+# ---- receiver-level tuner tests: real Radio + Engine against tools/stream_test_server.py (tools/run_tuner_check.sh)
+juce_add_console_app(wildband_tuner_check PRODUCT_NAME wildband_tuner_check)
+target_sources(wildband_tuner_check PRIVATE tools/TunerCheck.cpp src/Radio.cpp)
+target_compile_definitions(wildband_tuner_check PRIVATE ${WILDBAND_DEFS})
+target_link_libraries(wildband_tuner_check PRIVATE juce::juce_core "-framework AudioToolbox" juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+
 # ---- engine tests: no JUCE
 add_executable(wildband_tests tests/Tests.cpp)
 target_compile_options(wildband_tests PRIVATE -Wall -Wextra)

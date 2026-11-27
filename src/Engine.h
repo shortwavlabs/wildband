@@ -19,9 +19,9 @@ namespace wildband
 
 constexpr float kPi = 3.14159265358979f;
 
-enum Param : int { kTune, kPitch, kShape, kTone, kCouple, kDrift, kFeedback, kMix, kLevel, kNumParams };
-inline constexpr const char* paramNames[kNumParams] = { "TUNE", "PITCH", "SHAPE", "TONE", "COUPLE", "DRIFT", "FEEDBACK", "MIX", "LEVEL" };
-inline constexpr float paramDefaults[kNumParams] = { 0.0f, 0.33f, 0.4f, 0.6f, 0.4f, 0.2f, 0.55f, 0.7f, 0.5f };
+enum Param : int { kTune, kPitch, kShape, kTone, kCouple, kDrift, kFeedback, kMix, kLevel, kStatic, kNumParams };   // new parameters go at the end
+inline constexpr const char* paramNames[kNumParams] = { "TUNE", "PITCH", "SHAPE", "TONE", "COUPLE", "DRIFT", "FEEDBACK", "MIX", "LEVEL", "STATIC" };
+inline constexpr float paramDefaults[kNumParams] = { 0.0f, 0.33f, 0.4f, 0.6f, 0.4f, 0.2f, 0.55f, 0.7f, 0.5f, 0.5f };
 
 enum class Mode : int { Engine, Dry, Reference };
 
@@ -158,11 +158,57 @@ private:
 };
 
 // ---------------------------------------------------------------------------------------------------------------------
+/** Tuner static: SYNTHESIZED noise that fills the real wait for a station (docs/p0/TUNER-ACCEPTANCE.md). It is not
+    received radio, RF or interference from anywhere; only its timing comes from the world (the receiver's state).
+    Band-passed noise whose centre wanders slowly, a little hiss, and sparse crackle. Deterministic, no allocation,
+    zero-mean, never above 0.9. */
+class StaticSource
+{
+public:
+    static constexpr float kPeak = 0.9f;
+    void prepare (double sampleRate) noexcept
+    {
+        fs = sampleRate;
+        seed = 0x9E3779B9u; counter = 0; s1 = s2 = crackle = 0.0f; wander1 = 0.0f; wander2 = 1.7f;
+        crackleDecay = (float) std::exp (-1.0 / (0.0004 * fs));
+        crackleChance = (float) (9.0 / fs);                                    // about nine crackles a second
+        level = 0.62f * (float) std::sqrt (fs / 48000.0);                      // keeps the band's loudness the same at every sample rate
+    }
+    float next() noexcept
+    {
+        if ((counter++ & 31) == 0)                                             // the band's centre drifts between about 0.5 and 3.2 kHz
+        {
+            wander1 += 32.0f * 2.0f * kPi * 0.13f / (float) fs; if (wander1 > 2.0f * kPi) wander1 -= 2.0f * kPi;
+            wander2 += 32.0f * 2.0f * kPi * 0.31f / (float) fs; if (wander2 > 2.0f * kPi) wander2 -= 2.0f * kPi;
+            const float centre = 1300.0f * std::exp2 (1.3f * (0.6f * std::sin (wander1) + 0.4f * std::sin (wander2)));
+            g = std::tan (kPi * std::min (centre, (float) fs * 0.2f) / (float) fs);
+            a1 = 1.0f / (1.0f + g * (g + kDamping));
+        }
+        const float white = uniform();
+        const float v1 = a1 * (s1 + g * (white - s2)), v2 = s2 + g * v1;       // TPT state-variable band-pass
+        s1 = 2.0f * v1 - s1;
+        s2 = 2.0f * v2 - s2;
+        if (0.5f * (uniform() + 1.0f) < crackleChance) crackle = 0.9f * uniform();
+        crackle *= crackleDecay;
+        return std::min (kPeak, std::max (-kPeak, level * v1 + 0.05f * white + 0.5f * crackle));
+    }
+
+private:
+    float uniform() noexcept { seed = seed * 1664525u + 1013904223u; return (float) (int32_t) seed * (1.0f / 2147483648.0f); }   // -1 .. 1
+    static constexpr float kDamping = 1.0f / 1.4f;
+    double fs = 48000;
+    uint32_t seed = 0, counter = 0;
+    float s1 = 0, s2 = 0, g = 0, a1 = 0, crackle = 0, crackleDecay = 0, crackleChance = 0, wander1 = 0, wander2 = 0, level = 0;
+};
+
+// ---------------------------------------------------------------------------------------------------------------------
 struct Controls
 {
     float p[kNumParams] = {};
     Mode mode = Mode::Engine;
     float detune = 0.0f;   // Dial::offCentre
+    float gap = 0.0f;      // Radio::tuneGap: 0 = the station is playing, 1 = the receiver is fetching the one just asked for
+    int request = 0;       // Radio::request: changes with every station request, so each one gets its own static
     EnvFrame room;         // EnvBus::read
     RoutingPlan plan = RoutingPlan::fromGraph (Graph::defaultPatch());
 };
@@ -184,14 +230,26 @@ public:
         for (auto& d : refDelay) d.assign ((size_t) refSize, 0.0f);
         aParam = onePoleCoeff (0.015, fs); aFreq = onePoleCoeff (0.025, fs); aMode = onePoleCoeff (0.03, fs);
         aMod = onePoleCoeff (0.02, fs / kControlInterval);
+        tunerStatic.prepare (fs);
+        gapSeconds = 0.0f;
+        staticMuted = false;
         aDc = onePoleCoeff (1.0 / (2.0 * kPi * 5.0), fs);
         aFast = onePoleCoeff (0.002, fs); aFastRel = onePoleCoeff (0.06, fs); aSlow = onePoleCoeff (0.3, fs);
         reset();
     }
 
-    /** Clears all audio state; controls keep their values. Safe on the audio thread (also the PANIC action). */
+    /** PANIC: clears all audio state, and keeps the tuner static silent until the current retune has finished or the
+        player asks for another station. */
+    void panic() noexcept
+    {
+        reset();
+        staticMuted = true;
+    }
+
+    /** Clears all audio state; controls keep their values. Safe on the audio thread. */
     void reset() noexcept
     {
+        staticGain = 0.0f;
         for (auto& l : lines) std::fill (l.begin(), l.end(), 0.0f);
         for (auto& d : refDelay) std::fill (d.begin(), d.end(), 0.0f);
         lp = {}; dc = {}; svfA = {}; svfB = {}; refLp = {};
@@ -213,8 +271,15 @@ public:
             if (tick-- <= 0) { tick = kControlInterval - 1; updateTargets (c); }
             smooth();
 
-            // ---- radio, with the TUNE "detune" ring modulator
+            // ---- radio, with the TUNE "detune" ring modulator. While the receiver is fetching a station, synthesized
+            // static takes the broadcast's place HERE, at the radio input, so it is detuned, patched and resonated
+            // like one. (Nothing is added when there is no static, so STATIC at 0 leaves every sample as it was.)
             float xl = sanitize (radioL[s]), xr = sanitize (radioR[s]);
+            if (staticGain > 1.0e-6f || staticT > 0.0f)
+            {
+                const float hiss = staticGain * tunerStatic.next();
+                xl += hiss; xr += hiss;
+            }
             ringPhase += 2.0f * kPi * (20.0f + 380.0f * detune * detune) / (float) fs;
             if (ringPhase > 2.0f * kPi) ringPhase -= 2.0f * kPi;
             const float ring = (1.0f - detune + detune * std::cos (ringPhase)) * (1.0f - 0.4f * detune);
@@ -298,12 +363,12 @@ public:
             faults.fetch_add (1);
             peak = 0.0f;
         }
-        meterRadioLevel = radioLevel(); meterRadioActivity = radioActivity(); meterOut = peak;
+        meterRadioLevel = radioLevel(); meterRadioActivity = radioActivity(); meterOut = peak; meterStatic = staticGain;
     }
 
     float lineFrequency (int i) const noexcept { return freq[(size_t) i]; }
     std::atomic<int> faults { 0 };
-    std::atomic<float> meterRadioLevel { 0 }, meterRadioActivity { 0 }, meterOut { 0 };
+    std::atomic<float> meterRadioLevel { 0 }, meterRadioActivity { 0 }, meterOut { 0 }, meterStatic { 0 };
 
 private:
     static constexpr double kRefDelaySeconds = 0.33;
@@ -338,6 +403,15 @@ private:
         for (int i = 0; i < kNumParams; ++i) pt[i] = clamp01 (c.p[i]);
         detuneT = clamp01 (c.detune);
         for (int m = 0; m < 3; ++m) modeT[m] = (int) c.mode == m ? 1.0f : 0.0f;
+
+        // ---- tuner static: only while the receiver reports a gap, and never for longer than 8 s (full for 4 s, then
+        // fading), so a station that never arrives does not hiss for ever. PANIC mutes it until the gap has closed.
+        // Each new request starts the clock again (and lifts a PANIC mute): hopping onward from a station that never
+        // arrived must not find the static already spent.
+        const float gapIn = clamp01 (c.gap);
+        if (gapIn < 0.01f || c.request != lastRequest) { gapSeconds = 0.0f; staticMuted = false; lastRequest = c.request; }
+        else gapSeconds += (float) kControlInterval / (float) fs;
+        staticT = staticMuted ? 0.0f : gapIn * pt[kStatic] * clamp01 (2.0f - gapSeconds * 0.25f);
 
         // ---- the patch: each input reads the output plugged into it, scaled by that cable's signed depth, or nothing.
         // The plan comes from another thread, so every index and depth is checked here.
@@ -400,6 +474,7 @@ private:
         for (int m = 0; m < 3; ++m) modeW[m] += aMode * (modeT[m] - modeW[m]);
         for (int m = 0; m < 2; ++m) srcW[m] += aMode * (srcT[m] - srcW[m]);
         detune += aParam * (detuneT - detune);
+        staticGain += aParam * (staticT - staticGain);
         damp += aParam * (dampT - damp);
         gain += aParam * (gainT - gain);
         couple += aParam * (coupleT - couple);
@@ -430,6 +505,10 @@ private:
     float ringPhase = 0, refLfo = 0, rFast = 0, rSlow = 0;
     std::array<float, kNumInputs> mod {};   // smoothed value at each resonator input (index 0, the audio input, unused)
     float srcW[2] = {}, srcT[2] = {}, strikePlugged = 0, aMod = 0;
+    StaticSource tunerStatic;
+    float staticGain = 0, staticT = 0, gapSeconds = 0;
+    int lastRequest = 0;
+    bool staticMuted = false;
     float aParam = 0, aFreq = 0, aMode = 0, aDc = 0, aFast = 0, aFastRel = 0, aSlow = 0;
 };
 
