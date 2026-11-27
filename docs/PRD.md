@@ -25,7 +25,9 @@ Open the standalone app; hear a safe default. Tune a live Icecast/Shoutcast-comp
 
 **Field Kit-inspired follow-ups (proposed, not added to P0):** prioritize (1) auxiliary mixer and bounded feedback routing and (2) adjustable envelope follower + gate as first musical experiments after owner P0 audition. Evaluate (3) sensor/CV calibration and (4) a minimal LFO later; optional electromagnetic/contact pickup inputs and external actuators are future hardware investigations. Use TALORA's typed patching architecture where qualified. See [`FIELD-KIT-INSPIRED-UTILITIES.md`](FIELD-KIT-INSPIRED-UTILITIES.md) for rationale, safety limits and patch-recipe ideas.
 
-**Out of scope:** recording/export, sample harvesting, cloud user accounts, livestream relay service, Windows parity, raw RF sensing without SDR, full Eurorack simulation.
+**Post-P0 amendment:** [LOOP / Tapestry research](TAPESTRY-LOOPER-RESEARCH.md) is an owner-approved high-priority investigation of very short, explicitly captured volatile radio fragments. No change to P0 gates. No persisted audio or sample library.
+
+**Out of scope:** full-performance recording/export, sample harvesting, cloud user accounts, livestream relay service, Windows parity, raw RF sensing without SDR, full Eurorack simulation.
 
 ## Experience acceptance
 
