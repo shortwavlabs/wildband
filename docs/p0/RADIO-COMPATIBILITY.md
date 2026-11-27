@@ -15,7 +15,7 @@ A stream address is a server on the internet, not a frequency. TUNE chooses betw
 | Ogg Vorbis, Ogg Opus, FLAC | **Not supported.** Refused with a message; no retry | Local server `/ogg` |
 | HLS (`.m3u8`, `#EXT-X-…`) | **Not supported.** Refused with a message | Local server `/hls.m3u8` |
 | MPEG-DASH, RTSP, RTMP, MMS | Not supported, not tested | — |
-| `http://` and `https://` | **Works** (the app's Info.plist allows plain HTTP; many stations still use it) | `https` seen live inside the built app; `http` only in the command-line probe — see below |
+| `http://` and `https://` | **Works** (the app's Info.plist allows plain HTTP; many stations still use it) | Both seen live inside the built app (see below) |
 | HTTP redirects (up to 5) | **Works** | Local server `/redirect` |
 | `.m3u` and `.pls` playlists | **Works**, first address only, one level of indirection (two at most) | Local server `/list.m3u`, `/list.pls` |
 | ICY in-band metadata (song titles) | Not requested (`Icy-MetaData: 0`), so not displayed. If a server interleaves it anyway, it is stripped | Local server `/meta` |
@@ -58,8 +58,8 @@ peak was 1.07, above full scale; the engine clamps its input.
 
 Inside the built, ad-hoc-signed app: SomaFM Groove Salad (`https`) reached LIVE with a 6.0 s buffer at 48 kHz
 (seen in a capture of the app's status line, on the first muted launch). That is the only in-app observation of a
-playing stream: the timing sweeps did not log the radio state. **Plain `http://` stations have not been confirmed inside the app** (the attempt was blocked by the
-microphone prompt described in `EVIDENCE-LOG.md`); the Info.plist exception that permits them is present.
+playing stream: the timing sweeps did not log the radio state. Plain `http://` stations are confirmed inside the app as of the second pass: WFMU Freeform and BBC World Service
+both reached LIVE (status-line captures, muted).
 
 ## Evidence: awkward servers
 

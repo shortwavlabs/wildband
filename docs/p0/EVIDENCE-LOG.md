@@ -16,7 +16,7 @@ Everything here was produced on one machine on 2026-11-27. "Not done" means not 
 |---|---|---|---|
 | G0 Define the instrument | Stack chosen and justified; AFTERIMAGE and TALORA assessed (`ARCHITECTURE.md`, `TALORA-REUSE.md`) | Accept or change the one-sentence promise and non-goals; licensing | **Awaiting owner** |
 | G1 Source | 6 real stations from 5 operators decode and switch; drops and stalls recover (`RADIO-COMPATIBILITY.md`) | Hearing it play reliably; `http` stations inside the app | **Technical part done; awaiting owner** |
-| G2 Environment | Analyser maths tested (smooth, bounded, neutral on silence); permission flow written | The macOS prompt, real microphone, denial, revocation | **Not verified on hardware; awaiting owner.** One defect found (below) |
+| G2 Environment | Analyser maths tested; permission flow verified on hardware (prompt only on ROOM, denial, grant, values from the MiniFuse input, off) — see "Microphone prompt" below | Whether the room signal is *musically* usable; revocation | **Technical part done; awaiting owner listening** |
 | G3 Musical engine | Engine, DRY and REFERENCE modes built; safety and patch tests pass | All listening, across speech, music and noise | **Awaiting owner** |
 | G4 Performance interface | Knobs, patch bay, MIDI learn, Blender knob built; UI drawn and checked from a snapshot | Mouse and MIDI hardware use; two 15-minute sessions | **Awaiting owner** |
 | G5 Reliability | Callback timing on real CoreAudio, extreme-feedback tests, stream failure recovery | Sleep/wake, output switching, internet loss, mic revocation | **Partly done; awaiting owner** |
@@ -80,28 +80,87 @@ window had been idle, the worst row (30 µs for 64 samples at 96 kHz) would rise
 First run, for the record (no positive control, so its zeros alone proved nothing): worst 5.5 % at 96 kHz / 32
 (18 µs of 333 µs); 0 late callbacks, underruns, reconnects and faults.
 
-## Launch block: macOS asks for the microphone although no input is requested
+## Microphone prompt at launch: cause, fix, verification (2026-11-27, second pass)
 
-- **Seen:** on its first launch the app froze for a minute or two inside `AudioDeviceManager::initialise` →
-  `AudioDeviceCreateIOProcIDWithBlock` (process sample), then carried on by itself. Several rebuilt copies then
-  launched without blocking, including both timing sweeps. After a later rebuild it froze in the same place, and
-  this time the system dialog *"WILDBAND" would like to access the Microphone* was on screen (window capture).
-- **What is established:** the app asks JUCE for 0 inputs and 2 outputs; the microphone prompt appeared anyway; the
-  CoreAudio call does not return while the prompt is pending.
-- **What is not established:** the cause. The suspect is that the output device (MiniFuse 1) also has inputs, but
-  two launches forced onto the built-in speakers also never opened an audio device — while the earlier prompt was
-  still on screen, so that test separates nothing. Why some rebuilt copies prompted and others did not is also
-  unexplained (the app is ad-hoc signed, so macOS may treat a rebuild as a new program). How the first block
-  cleared is unknown.
-- **Why it matters:** PRD P0-08 says no automatic microphone permission. The app does not *read* the microphone
-  until ROOM is on, but a *prompt* that appears unasked is a defect against that requirement.
-- **Never run:** the "Don't Allow" path. If denying leaves the app with no audio output, that also fails PRD P0-07.
-  **This is the first thing for the owner to check.**
-- **Mitigation in the prototype:** the window now opens first with a note; the audio device is opened a quarter of
-  a second later.
-- **The prompt was left unanswered** and was still on screen at hand-over. Answering it is the owner's decision.
-- **Fix candidates (not done, and unproven until the cause is known):** open the output with a small CoreAudio HAL
-  unit that disables input streams, or patch JUCE's CoreAudio device to set the IOProc stream usage.
+**Owner's report:** with permission undetermined, macOS asked for the microphone before ROOM was enabled; after
+"Don't Allow" there was no usable output; choosing an output in AUDIO raised another request.
+
+### Cause (established)
+
+`WILDBAND.app --probe=FILE` performs CoreAudio operations one at a time and logs the microphone status and elapsed
+time around each, so a step that prompts is the last `BEGIN` without an `END`. Three runs, each after
+`tccutil reset Microphone com.shortwavlabs.wildband`:
+
+| Build | Result | Log |
+|---|---|---|
+| Original (app declares `NSMicrophoneUsageDescription`) | Blocked in the very first step with the system prompt on screen. Process sample: `AudioComponentInstanceNew` → `AudioDeviceCreateIOProcID` → `_TellServerAboutStreamUsage`. The step asked for the built-in speakers with input disabled; Apple's output unit attaches to the *default* output (MiniFuse, 4 in / 4 out) first | [`mic-trigger-probe-undetermined.txt`](evidence/mic-trigger-probe-undetermined.txt) |
+| Same binary, usage text removed from Info.plist, re-signed | All five steps complete in 4.5 s: output unit and raw IO proc, on the speakers and on the MiniFuse, 93–94 output callbacks per second each. No prompt, status stays `undetermined` | [`mic-trigger-probe-no-usage-string.txt`](evidence/mic-trigger-probe-no-usage-string.txt) |
+| Fixed build | Same as the row above | [`mic-trigger-probe-fixed-build.txt`](evidence/mic-trigger-probe-fixed-build.txt) |
+
+So: **an app that declares microphone use is shown the microphone prompt the moment any IO proc is created on a
+device that has input streams, whichever API creates it, and the call does not return until the prompt is answered.**
+Answers to the specific questions asked:
+
+- *Saved XML device state / restored input channel masks:* not the cause. It happens on a first launch with no
+  saved state, and in a probe that never touches JUCE.
+- *`closeInputs()` only after initialisation:* irrelevant for the same reason (and that code is gone).
+- *Does CoreAudio open the input side of combined devices?* In effect yes: an IO proc is created on the whole
+  device, and JUCE 9.0.5's CoreAudio backend (`AudioDeviceProcessor`, one `AudioDeviceCreateIOProcIDWithBlock`) has
+  no means of marking input streams unused. Apple's own output unit with input disabled does the same.
+- *Does selecting an output reopen the device with inputs?* It creates a new IO proc, so it asks again while the
+  status is undetermined.
+- *Does the app or JUCE call an authorization API unexpectedly?* No. JUCE's audio-device code contains no
+  authorization call on macOS; the app's only request was behind the ROOM button.
+- *Why some earlier launches did not block* (noted in the first pass as unexplained): not investigated further.
+  An unanswered prompt from a process that has exited stays on screen for a minute or more and holds up later
+  requests, which muddied those observations.
+
+### Fix
+
+The instrument no longer declares microphone use at all, so macOS has nothing to ask on its behalf. ROOM moved to a
+separate helper app, **WILDBAND Room** (`src/RoomHelper.mm`, bundle id `com.shortwavlabs.wildband.room`), which has
+its own usage text and its own permission. The ROOM button starts it; nothing else does. It asks for permission,
+analyses the chosen input, and sends three numbers 50 times a second to the instrument over loopback UDP. Switching
+ROOM off terminates it. The instrument's audio output is not touched by any of this. The input ROOM listens to is
+chosen in the AUDIO… dialog; by default it is the interface being played through if that has inputs.
+
+Two things found on the way, both now in the code:
+
+- The helper must sit **beside** `WILDBAND.app`, not inside it. Nested, macOS attributed its request to WILDBAND
+  and killed it ("attempted to access privacy-sensitive data without a usage description"; two crash reports).
+- It must not be launched in the background (`open -g`): macOS then denied silently, with no prompt.
+- The first capture implementation (Apple's HAL unit, input side) delivered digital silence (−200 dBFS) with
+  permission granted. Replaced by a plain device IO proc; cause of the silence not pursued.
+
+### Verification
+
+All runs muted, on this Mac, MiniFuse 1 as default output unless stated. "Seen" means a capture of the app window or
+of the system alert; the owner clicked the prompts.
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Fresh permissions → launch without a prompt | **Pass.** No alert; `LIVE WFMU Freeform … 48.0 kHz / 512` on the MiniFuse. Same on the built-in speakers (`--output`), `LIVE BBC World Service` |
+| 2 | Denied → radio plays | **Pass.** After the owner's "Don't Allow": relaunch, no alert, `LIVE` on the MiniFuse |
+| 3 | Denied → other output device works | **Pass at launch** (`--output="MacBook Pro Speakers"`: `LIVE KEXP`, no alert). **Not performed:** switching by hand in the AUDIO… dialog while playing |
+| 4 | ROOM on → permission requested explicitly | **Pass.** Alert appears only after ROOM is switched on, and reads *"WILDBAND Room" would like to access the Microphone*. Radio `LIVE` with a 6.0 s buffer while it is pending |
+| 5 | ROOM denied → radio keeps playing | **Pass.** Owner clicked "Don't Allow": ROOM unticked itself with an explanation, helper exited, status line still `LIVE … buffer 6.0 s` |
+| 6 | ROOM authorised → microphone features operate | **Pass on the MiniFuse input.** Six readouts over 8 s: level 0.48–0.61, hits 0.14–0.34, bright 0.06, raw input −29 to −51 dBFS. On the MacBook microphone the *first* capture implementation gave silence; the replacement has not been re-run on it |
+| 7 | ROOM off → capture stops | **Pass.** Helper process gone; main app running and `LIVE`. The output device is not reopened (the code path does not touch it) |
+| 8 | Relaunch with saved settings → no premature request | **Pass** with permission granted and with it denied: no alert at launch, helper not running until ROOM is switched on |
+
+### Limitations
+
+- The builds are ad-hoc signed, so **every rebuild of the helper makes macOS ask again** the next time ROOM is
+  switched on (seen three times). A Developer ID signature would end that. The instrument itself never asks.
+- Two apps must be kept side by side (`WILDBAND.app`, `WILDBAND Room.app`).
+- While the prompt is up, macOS brings the helper to the front; the instrument takes focus back when it is answered.
+- Room values travel by UDP on 127.0.0.1 and are read on the UI timer, so they reach the engine up to about 35 ms
+  late. Any local process could send values to that port; they are clamped to 0..1 and can only move control inputs.
+- All input channels of the chosen device are summed; there is no channel picker.
+- Not performed: revoking permission while ROOM is on; unplugging the input while ROOM is on; ROOM across
+  sleep/wake; choosing the input by hand in the dialog (the layout was checked from a snapshot,
+  [`evidence/ui-audio-settings.png`](evidence/ui-audio-settings.png)).
+- The timing sweep was not re-run on this build.
 
 ## Blender → JUCE spike (PRD P0-10)
 
@@ -114,7 +173,7 @@ and resizing stay in JUCE. Checked from an offscreen snapshot of the real UI
 
 ## Not done
 
-Listening of any kind; a real microphone; mouse interaction with the patch bay or knobs; any MIDI hardware (one
+Listening of any kind; mouse interaction with the patch bay or knobs; any MIDI hardware (one
 MIDI input was detected, nothing was received; no controller is mapped until MIDI LEARN is used); sleep/wake;
 switching output devices while playing; internet loss; revoking microphone access; sessions longer than a few
 minutes; any second Mac.

@@ -27,21 +27,35 @@ juce_add_gui_app(WILDBAND
     PRODUCT_NAME "WILDBAND"
     COMPANY_NAME "Shortwav Labs"
     BUNDLE_ID com.shortwavlabs.wildband
-    MICROPHONE_PERMISSION_ENABLED TRUE
-    MICROPHONE_PERMISSION_TEXT "WILDBAND listens to the room to shape its sound. The microphone is analysed on this Mac only. It is never played back, stored or sent anywhere."
+    # Deliberately NO microphone usage text here: an app that declares microphone use is shown the macOS microphone
+    # prompt as soon as it opens an audio device that has inputs, even for playback. ROOM lives in the helper below.
     # many stations still serve plain http://
     PLIST_TO_MERGE "<plist><dict><key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoads</key><true/></dict></dict></plist>")
-target_sources(WILDBAND PRIVATE src/Main.cpp src/Radio.cpp src/MicPermission.mm)
+target_sources(WILDBAND PRIVATE src/Main.cpp src/Radio.cpp src/MicPermission.mm src/AudioIO.cpp)
 target_compile_definitions(WILDBAND PRIVATE ${WILDBAND_DEFS} JUCE_APPLICATION_NAME_STRING="WILDBAND" JUCE_APPLICATION_VERSION_STRING="${PROJECT_VERSION}")
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/assets/knob/knob.png)
     juce_add_binary_data(wildband_assets SOURCES assets/knob/knob.png)
     target_link_libraries(WILDBAND PRIVATE wildband_assets)
     target_compile_definitions(WILDBAND PRIVATE WILDBAND_HAS_KNOB=1)
 endif()
-target_link_libraries(WILDBAND PRIVATE juce::juce_audio_utils "-framework AudioToolbox" "-framework AVFoundation"
+target_link_libraries(WILDBAND PRIVATE juce::juce_audio_utils "-framework AudioToolbox" "-framework AVFoundation" "-framework CoreAudio"
     juce::juce_recommended_config_flags juce::juce_recommended_lto_flags juce::juce_recommended_warning_flags)
-# ad-hoc signature over the finished bundle, so macOS can remember the microphone decision. Not a Developer ID.
-add_custom_command(TARGET WILDBAND POST_BUILD VERBATIM COMMAND codesign --force --deep --sign - "$<TARGET_BUNDLE_DIR:WILDBAND>")
+
+# ---- "WILDBAND Room": the microphone helper. Its own bundle id, its own usage text, its own macOS permission.
+add_executable(wildband_room MACOSX_BUNDLE src/RoomHelper.mm src/AudioIO.cpp src/MicPermission.mm)
+set_target_properties(wildband_room PROPERTIES OUTPUT_NAME "WILDBAND Room" MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/cmake/RoomHelper.plist)
+target_compile_options(wildband_room PRIVATE -Wall -Wextra)
+target_link_libraries(wildband_room PRIVATE "-framework AudioToolbox" "-framework CoreAudio" "-framework AVFoundation" "-framework CoreFoundation" "-framework Foundation")
+
+# The helper goes BESIDE the app, not inside it: nested in WILDBAND.app, macOS attributes its microphone request to
+# WILDBAND (which declares no microphone use) and kills it (observed; docs/p0/EVIDENCE-LOG.md). Both get an ad-hoc
+# signature so macOS can remember the helper's microphone decision. Not a Developer ID.
+add_dependencies(WILDBAND wildband_room)
+add_custom_command(TARGET WILDBAND POST_BUILD VERBATIM
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_BUNDLE_DIR:WILDBAND>/../WILDBAND Room.app"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_BUNDLE_DIR:wildband_room>" "$<TARGET_BUNDLE_DIR:WILDBAND>/../WILDBAND Room.app"
+    COMMAND codesign --force --sign - "$<TARGET_BUNDLE_DIR:WILDBAND>/../WILDBAND Room.app"
+    COMMAND codesign --force --sign - "$<TARGET_BUNDLE_DIR:WILDBAND>")
 
 # ---- G1 evidence tool: the real receiver, no audio device
 juce_add_console_app(wildband_radio_probe PRODUCT_NAME wildband_radio_probe)

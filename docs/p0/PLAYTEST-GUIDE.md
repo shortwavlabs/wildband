@@ -12,16 +12,9 @@ positions, the six station addresses, the patch and the MIDI map.
 open build/WILDBAND_artefacts/Release/WILDBAND.app
 ```
 
-- **A macOS microphone prompt for WILDBAND is probably already on your screen**, left unanswered from testing, and
-  macOS may ask again when the app starts. This is a known defect: the app has not asked for the microphone and does
-  not listen until ROOM is on, yet it produces no sound until the prompt is answered. The cause is not established.
-- **Please check both answers, "Don't Allow" first.** Whether the instrument still plays after "Don't Allow" has
-  never been tested; if it stays silent, that is a second defect worth knowing before anything else. To get the
-  question again afterwards:
-
-```bash
-tccutil reset Microphone com.shortwavlabs.wildband
-```
+- The app must stay next to **WILDBAND Room.app** (the build puts both in `build/WILDBAND_artefacts/Release/`).
+- **WILDBAND itself never asks for the microphone.** If macOS ever asks on behalf of "WILDBAND" (not "WILDBAND
+  Room"), that is a regression: please report it.
 
 ## How do I start a live radio stream?
 
@@ -36,12 +29,21 @@ such; it is not radio.
 
 ## How do I enable or disable environmental sensing?
 
-Tick **ROOM (microphone)**. macOS asks for permission the first time. The microphone is analysed for loudness,
-sudden sounds and brightness only; it is never played, stored or sent anywhere. Untick to stop; the three ROOM
-sockets then read zero. If permission is denied, ROOM stays off and the line beside the buttons says why.
+Tick **ROOM (microphone)**. A small helper app, WILDBAND Room, starts, and macOS asks whether *it* may use the
+microphone (the first time, and again after every rebuild of this unsigned prototype). The radio keeps playing
+whatever you answer. If you allow it, the line beside the buttons shows what ROOM hears: `level`, `hits`, `bright`
+and the raw input level in dBFS. Untick ROOM to stop: the helper quits and the three ROOM sockets read zero. If you
+deny it, ROOM unticks itself and says how to change your mind (System Settings > Privacy & Security > Microphone >
+WILDBAND Room).
 
-**Use headphones for the first ROOM session.** With speakers, the instrument hears itself and can push its own
-feedback up. It is limited, but you should meet that on purpose, not by surprise.
+**Which input:** **AUDIO…** → *ROOM input*. By default it is the interface you are playing through if it has inputs
+(the MiniFuse), otherwise the system default input. All of that device's input channels are summed. Changing it
+while ROOM is on restarts the helper only.
+
+The input is analysed for loudness, sudden sounds and brightness. It is never played, stored or sent off this Mac.
+
+**Use headphones for the first ROOM session**, or keep the microphone away from the speakers. Otherwise the
+instrument hears itself and can push its own feedback up. It is limited, but meet that on purpose.
 
 ## How do I control the instrument?
 
@@ -120,16 +122,18 @@ One thing to change first:
 ## Reliability checks only the owner can do (G5)
 
 Close and open the lid mid-stream. Switch the output device in **AUDIO…** and in System Settings while playing.
-Turn Wi-Fi off for 20 seconds. Deny the microphone, then allow it. Revoke it in System Settings while ROOM is on.
+Turn Wi-Fi off for 20 seconds. Revoke WILDBAND Room's microphone access in System Settings while ROOM is on. Unplug the
+input device while ROOM is on.
 Leave it running for an hour and note any re-buffering.
 
 ## Known limitations
 
-- The microphone prompt at launch, described above; denying it is untested.
+- macOS asks about WILDBAND Room again after every rebuild (unsigned prototype).
+- Room values arrive about 35 ms late; all input channels are summed, with no channel picker.
 - MP3 and AAC only: no Ogg, Opus, FLAC or HLS stations.
 - The radio is a few seconds behind the broadcast; a retune takes up to about two seconds.
 - Control cables only push one way; one cable per input.
 - No presets, no undo for cables, no keyboard control, no accessibility work.
-- Only the output device can be chosen; ROOM uses the system's default input.
-- Ad-hoc signed: it runs on this Mac. macOS may ask about the microphone again after a rebuild.
+- Keep WILDBAND.app and WILDBAND Room.app in the same folder.
+- Ad-hoc signed: it runs on this Mac only.
 - Tested for minutes on one audio interface. Not tested across sleep, device changes or network loss.

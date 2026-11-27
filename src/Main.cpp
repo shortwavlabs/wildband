@@ -3,6 +3,10 @@
 // CoreAudio timing sweep used for docs/p0/EVIDENCE-LOG.md and quits.
 #include <juce_audio_utils/juce_audio_utils.h>
 
+#include <csignal>
+#include <unistd.h>
+
+#include "AudioIO.h"
 #include "Engine.h"
 #include "MicPermission.h"
 #include "Radio.h"
@@ -17,6 +21,8 @@ using namespace wildband;
 
 const juce::Colour kOrange (0xffF59E0B), kRadio (0xff38BDF8), kRoom (0xff34D399), kLocal (0xff9CA3AF), kPanel (0xff1C1917), kBack (0xff0C0A09), kText (0xffE7E5E4);
 juce::Colour moduleColour (int module) { return module == kModRadio ? kRadio : module == kModRoom ? kRoom : module == kModLocal ? kLocal : kOrange; }
+
+bool roomAtStart = false;   // --room (test aid)
 
 struct Station { juce::String name, url; };
 // Starting points only: public stream addresses of independent broadcasters. Nothing of theirs is bundled, and a
@@ -53,7 +59,7 @@ public:
     std::atomic<bool> mapDirty { false };
     std::atomic<float> roomLevel { 0 }, roomActivity { 0 }, roomBrightness { 0 };
     std::atomic<double> sampleRate { 0 };
-    std::atomic<int> blockSize { 0 }, inputChannels { 0 };
+    std::atomic<int> blockSize { 0 };
 
     Radio radio;
     Engine engine;
@@ -81,18 +87,20 @@ public:
     {
         const double fs = device->getCurrentSampleRate();
         engine.prepare (fs);
-        room.prepare (fs);
         local.prepare (fs);
         radio.setOutputRate (fs);
         sampleRate = fs;
         blockSize = device->getCurrentBufferSizeSamples();
-        inputChannels = device->getActiveInputChannels().countNumberOfSetBits();
         lastHostNs = 0;
         perf.reset();
     }
-    void audioDeviceStopped() override { sampleRate = 0; env.withdraw (kEnvMicrophone); }
+    void audioDeviceStopped() override { sampleRate = 0; }
 
-    void audioDeviceIOCallbackWithContext (const float* const* in, int numIn, float* const* out, int numOut, int n, const juce::AudioIODeviceCallbackContext& context) override
+    /** Message thread: the latest values from the WILDBAND Room helper. They go stale, and so neutral, by themselves. */
+    void publishRoom (EnvFrame frame) { env.publish (kEnvMicrophone, frame, (int64_t) juce::Time::getMillisecondCounter()); }
+    void withdrawRoom() { env.withdraw (kEnvMicrophone); }
+
+    void audioDeviceIOCallbackWithContext (const float* const*, int, float* const* out, int numOut, int n, const juce::AudioIODeviceCallbackContext& context) override
     {
         const auto t0 = juce::Time::getHighResolutionTicks();
         juce::ScopedNoDenormals noDenormals;
@@ -104,14 +112,12 @@ public:
         c.detune = dial (c.p[kTune], kNumStations).offCentre;
         c.plan = RoutingPlan::unpack (plan.load (std::memory_order_relaxed));
         const auto nowMs = (int64_t) juce::Time::getMillisecondCounter();
-        const bool mic = roomEnabled.load (std::memory_order_relaxed) && numIn > 0 && in[0] != nullptr;
 
         for (int at = 0; at < n; at += kScratch)
         {
             const int m = juce::jmin (kScratch, n - at);
             radio.read (radioL, radioR, m);
             for (int i = 0; i < m; ++i) localBuf[i] = local.next();
-            if (mic) env.publish (kEnvMicrophone, room.process (in[0] + at, m), nowMs);   // analysed here; never routed to the output
             c.room = env.read (nowMs);
             float* l = numOut > 0 && out[0] != nullptr ? out[0] + at : spare;
             float* r = numOut > 1 && out[1] != nullptr ? out[1] + at : spare;
@@ -166,7 +172,6 @@ public:
 private:
     static constexpr int kScratch = 2048;
     EnvBus env;
-    RoomAnalyser room;
     TestSource local;
     float radioL[kScratch], radioR[kScratch], localBuf[kScratch], spare[kScratch];
     uint64_t lastHostNs = 0;
@@ -349,7 +354,7 @@ private:
 };
 
 // ---------------------------------------------------------------------------------------------------------------------
-class MainComponent final : public juce::Component, private juce::Timer, private juce::ChangeListener
+class MainComponent final : public juce::Component, private juce::Timer
 {
 public:
     MainComponent (const juce::String& measureFile, bool muted, int station, const juce::String& output) : measurePath (measureFile), transient (muted || measureFile.isNotEmpty())
@@ -449,12 +454,6 @@ public:
         patch.onMessage = [this] (const juce::String& m) { flash (m); };
         patch.onChange();
 
-        // KNOWN DEFECT (docs/p0/EVIDENCE-LOG.md): macOS has shown its microphone prompt while CoreAudio opened the
-        // output device, and blocked this thread until it was answered, although no input is requested. The cause is
-        // not established (a device with inputs is the suspect). So the window goes up first, with a note, and the
-        // device is opened a moment later (openAudio, from the timer).
-        if (microphoneAccess() == MicAccess::Undetermined)
-            roomMessage = "macOS may ask about the microphone now, although WILDBAND has not asked for it. It only listens while ROOM is on. Sound starts once you answer.";
         openMidiInputs();
         midiList = juce::MidiDeviceListConnection::make ([this] { openMidiInputs(); });
 
@@ -464,16 +463,14 @@ public:
 
     void openAudio()
     {
-        // output only at launch: the microphone is opened by the ROOM button, never automatically
+        // Output only, always. This app declares no microphone use, so macOS never asks on its behalf; any input left
+        // in a saved setup is dropped anyway.
         auto saved = settings.getUserSettings()->getXmlValue ("audio");
-        if (saved != nullptr) saved->removeAttribute ("audioInputDeviceName");
+        if (saved != nullptr) { saved->removeAttribute ("audioInputDeviceName"); saved->removeAttribute ("audioDeviceInChans"); }
         juce::AudioDeviceManager::AudioDeviceSetup preferred;
         preferred.outputDeviceName = outputOverride;
         devices.initialise (0, 2, outputOverride.isEmpty() ? saved.get() : nullptr, true, {}, outputOverride.isEmpty() ? nullptr : &preferred);
-        closeInputs();
         devices.addAudioCallback (&instrument);
-        devices.addChangeListener (this);
-        if (roomMessage.startsWith ("macOS may ask")) roomMessage.clear();
         if (measurePath.isNotEmpty()) beginMeasure();
     }
 
@@ -481,7 +478,7 @@ public:
     {
         stopTimer();
         saveSettings();
-        devices.removeChangeListener (this);
+        stopRoomHelper();
         devices.removeAudioCallback (&instrument);
         devices.removeMidiInputDeviceCallback ({}, &instrument);
         devices.closeAudioDevice();
@@ -538,16 +535,32 @@ private:
     // ---- periodic UI work: follow MIDI, drive the tuner, show state. Nothing here touches the audio thread.
     void timerCallback() override
     {
+        pollRoom();
         if (++ticks == 4 && snapshotPath.isNotEmpty())   // --snapshot=FILE (test aid): draw the UI to a PNG and quit; audio is never opened
         {
             juce::FileOutputStream out { juce::File (snapshotPath) };
             out.setPosition (0);
             out.truncate();
             juce::PNGImageFormat().writeImageToStream (createComponentSnapshot (getLocalBounds(), true, 2.0f), out);
+            AudioSettings dialog (*this);                    // and the audio settings dialog, beside it
+            dialog.setLookAndFeel (&look);
+            juce::FileOutputStream out2 { juce::File (snapshotPath).getSiblingFile (juce::File (snapshotPath).getFileNameWithoutExtension() + "-audio.png") };
+            out2.setPosition (0);
+            out2.truncate();
+            juce::PNGImageFormat().writeImageToStream (dialog.createComponentSnapshot (dialog.getLocalBounds(), true, 2.0f), out2);
+            dialog.setLookAndFeel (nullptr);
             juce::JUCEApplication::quit();
             return;
         }
         if (ticks == 8) openAudio();            // a quarter of a second after the window appears
+        if (ticks == 150 && roomAtStart) { roomButton.setToggleState (true, juce::dontSendNotification); setRoom (true); }   // --room (test aid): press ROOM after 5 s
+        if (roomAtStart && instrument.roomEnabled.load() && roomListeningSince != 0 && juce::Time::getMillisecondCounter() - roomListeningSince > 10000)
+        {
+            roomAtStart = false;                                                 // ...and switch it off again 10 s after it starts listening
+            roomButton.setToggleState (false, juce::dontSendNotification);
+            setRoom (false);
+            roomMessage = "ROOM switched off by the --room test.";
+        }
 
         for (int i = 0; i < kNumParams; ++i)
         {
@@ -588,8 +601,7 @@ private:
         if (now > flashUntil)
         {
             juce::String h;
-            if (ticks < 8 && roomMessage.isNotEmpty()) h = roomMessage;
-            else if (learn.getToggleState()) h = "Touch a knob on screen, then move a control on your controller.";
+            if (learn.getToggleState()) h = "Touch a knob on screen, then move a control on your controller.";
             else if (patch.graph.cableInto (kResAudioIn) < 0) h = "Nothing is patched into RESONATOR IN: drag a cable from an AUDIO output.";
             else if (patch.graph.cableInto (kResAudioIn) == kLocalAudioOut) h = "LOCAL TEST SOURCE is playing. It is not live radio.";
             else if (roomMessage.isNotEmpty()) h = roomMessage;
@@ -613,64 +625,98 @@ private:
         settingsDirty = true;
     }
 
-    // ---- ROOM: explicit permission, then the default input device; analysis only
+    // ---- ROOM. The microphone belongs to a separate helper app ("WILDBAND Room", src/RoomHelper.mm) with its own
+    // macOS permission; this app never touches an input. The button starts and stops that helper, and the audio output
+    // is not involved either way. The helper reports three control values over loopback UDP.
     void setRoom (bool on)
     {
-        if (! on)
+        stopRoomHelper();
+        instrument.roomEnabled = false;
+        instrument.withdrawRoom();
+        roomMessage.clear();
+        roomDevice.clear();
+        if (! on) return;
+
+        const auto helper = juce::File::getSpecialLocation (juce::File::currentApplicationFile).getSiblingFile ("WILDBAND Room.app");   // beside this app, not inside it
+        roomSocket = std::make_unique<juce::DatagramSocket>();
+        if (! helper.exists() || ! roomSocket->bindToPort (0, "127.0.0.1"))
         {
-            instrument.roomEnabled = false;
-            closeInputs();
-            roomMessage.clear();
+            roomSocket.reset();
+            roomButton.setToggleState (false, juce::dontSendNotification);
+            roomMessage = "ROOM is unavailable (WILDBAND Room.app must sit beside WILDBAND.app). Playback is unaffected.";
             return;
         }
-        requestMicrophone ([safe = juce::Component::SafePointer<MainComponent> (this)] (bool granted)
-        {
-            if (safe == nullptr) return;
-            if (! granted)
-            {
-                safe->roomButton.setToggleState (false, juce::dontSendNotification);
-                safe->roomMessage = "Microphone access is off, so ROOM stays neutral. Allow WILDBAND in System Settings > Privacy & Security > Microphone.";
-                return;
-            }
-            auto setup = safe->devices.getAudioDeviceSetup();
-            setup.inputDeviceName = {};
-            if (auto* type = safe->devices.getCurrentDeviceTypeObject())
-                setup.inputDeviceName = type->getDeviceNames (true)[type->getDefaultDeviceIndex (true)];
-            setup.useDefaultInputChannels = true;
-            const auto error = setup.inputDeviceName.isEmpty() ? juce::String ("no input device") : safe->devices.setAudioDeviceSetup (setup, true);
-            auto* device = safe->devices.getCurrentAudioDevice();
-            if (error.isNotEmpty() || device == nullptr || device->getActiveInputChannels().isZero())
-            {
-                safe->roomButton.setToggleState (false, juce::dontSendNotification);
-                safe->roomMessage = "Could not open the microphone (" + (error.isNotEmpty() ? error : juce::String ("no input channels")) + "). ROOM stays neutral.";
-                safe->closeInputs();
-                return;
-            }
-            safe->instrument.roomEnabled = true;
-            safe->roomMessage = "ROOM is listening on " + setup.inputDeviceName + " (analysed here; never played or stored).";
-        });
+        // Started through LaunchServices ("open"), not as a child process, so that macOS holds the helper - not this
+        // app - responsible for the microphone. Not in the background ("-g"): macOS then denies without asking (observed).
+        juce::ChildProcess().start (juce::StringArray { "/usr/bin/open", "-n", "-a", helper.getFullPathName(), "--args",
+                                                        "--port", juce::String (roomSocket->getBoundPort()), "--parent", juce::String (getpid()),
+                                                        "--device", roomInputUid() }, 0);
+        roomStarted = roomHeard = juce::Time::getMillisecondCounter();
+        roomMessage = "Starting ROOM...";
     }
 
-    void closeInputs()
+    void stopRoomHelper()
     {
-        auto setup = devices.getAudioDeviceSetup();
-        if (setup.inputDeviceName.isEmpty() && setup.inputChannels.isZero()) return;
-        setup.inputDeviceName = {};
-        setup.useDefaultInputChannels = false;
-        setup.inputChannels.clear();
-        devices.setAudioDeviceSetup (setup, true);
+        if (roomPid > 0) ::kill (roomPid, SIGTERM);      // capture stops with the process
+        roomPid = 0;
+        roomSocket.reset();
     }
 
-    void changeListenerCallback (juce::ChangeBroadcaster*) override
+    void roomOff (const juce::String& why)
     {
-        auto* device = devices.getCurrentAudioDevice();
-        if (instrument.roomEnabled.load() && (device == nullptr || device->getActiveInputChannels().isZero()))   // the input went away under us
+        stopRoomHelper();
+        instrument.roomEnabled = false;
+        instrument.withdrawRoom();
+        roomButton.setToggleState (false, juce::dontSendNotification);
+        roomDevice.clear();
+        roomMessage = why;
+    }
+
+    /** Timer: read what the helper has sent. ponytail: polled at 30 Hz on the message thread, so room values reach the
+        engine up to ~35 ms late; move to a socket thread if claps feel late. */
+    void pollRoom()
+    {
+        if (roomSocket == nullptr) return;
+        const auto now = juce::Time::getMillisecondCounter();
+        char data[512];
+        while (roomSocket != nullptr && roomSocket->waitUntilReady (true, 0) == 1)
         {
-            instrument.roomEnabled = false;
-            roomButton.setToggleState (false, juce::dontSendNotification);
-            roomMessage = "The microphone is no longer available. ROOM is neutral.";
+            const int n = roomSocket->read (data, (int) sizeof (data) - 1, false);
+            if (n <= 0) break;
+            const auto words = juce::StringArray::fromTokens (juce::String::fromUTF8 (data, n), " ", "");
+            roomHeard = now;
+            if (words[0] == "room" && words.size() >= 4)
+            {
+                instrument.publishRoom ({ words[1].getFloatValue(), words[2].getFloatValue(), words[3].getFloatValue() });   // clamped by EnvBus
+                if (roomDevice.isNotEmpty())
+                    roomMessage = "ROOM is listening on " + roomDevice + " (never played or stored).  level " + words[1].substring (0, 4) + "  hits " + words[2].substring (0, 4) + "  bright " + words[3].substring (0, 4) + "  (" + words[4] + " dBFS" + (words[5] == "0" ? ", NO AUDIO ARRIVING" : "") + ")";
+            }
+            else if (words[0] == "asking")
+            {
+                roomPid = words[1].getIntValue();
+                roomMessage = "macOS is asking whether WILDBAND Room may use the microphone. The radio keeps playing either way.";
+            }
+            else if (words[0] == "listening")
+            {
+                roomPid = words[1].getIntValue();
+                instrument.roomEnabled = true;
+                roomListeningSince = now;
+                juce::Process::makeForegroundProcess();      // the helper was launched in front; take the keyboard back
+                roomDevice = words.joinIntoString (" ", 2);
+                roomMessage = "ROOM is listening on " + roomDevice + " (never played or stored).";
+            }
+            else if (words[0] == "denied")
+            {
+                juce::Process::makeForegroundProcess();
+                roomOff ("Microphone access is off, so ROOM stays neutral. To allow it: System Settings > Privacy & Security > Microphone > WILDBAND Room.");
+            }
+            else if (words[0] == "error")
+                roomOff ("ROOM could not open the microphone (" + words.joinIntoString (" ", 1) + "). Playback is unaffected.");
         }
-        settingsDirty = true;
+        // no word from the helper: it never started, or it has gone (a pending macOS prompt keeps it silent, so only
+        // give up once it had begun listening, or if it never even reported in)
+        if (roomSocket != nullptr && ((instrument.roomEnabled.load() && now - roomHeard > 3000) || (roomPid == 0 && now - roomStarted > 8000)))
+            roomOff ("ROOM stopped (the WILDBAND Room helper is not running). Playback is unaffected.");
     }
 
     void openMidiInputs()
@@ -682,13 +728,74 @@ private:
         midiInputs = inputs.size();
     }
 
+    /** The input ROOM listens to: the saved choice if it is connected; otherwise the interface being played through, if
+        it has inputs; otherwise the system default input (an empty UID). */
+    juce::String roomInputUid()
+    {
+        const auto saved = settings.getUserSettings()->getValue ("roomInput", "auto");
+        const auto all = audioDevices();
+        if (saved == "default") return {};
+        for (const auto& d : all) if (saved == juce::String (d.uid) && d.inputChannels > 0) return saved;
+        if (auto* output = devices.getCurrentAudioDevice())
+            for (const auto& d : all) if (output->getName() == juce::String (d.name) && d.inputChannels > 0) return d.uid;
+        return {};
+    }
+
+    /** Audio settings dialog: the output device (JUCE's selector) and, below it, which input ROOM listens to. */
+    struct AudioSettings final : juce::Component
+    {
+        AudioSettings (MainComponent& m) : owner (m), selector (m.devices, 0, 0, 2, 2, false, false, true, false)
+        {
+            addAndMakeVisible (selector);
+            addAndMakeVisible (label);
+            addAndMakeVisible (input);
+            addAndMakeVisible (note);
+            label.setText ("ROOM input", juce::dontSendNotification);
+            note.setText ("Used only while ROOM is on. It is analysed, never played or recorded.", juce::dontSendNotification);
+            note.setFont (juce::FontOptions (12.0f));
+            const auto current = owner.roomInputUid();
+            input.addItem ("System default input", 1);
+            uids.add ({});
+            for (const auto& d : audioDevices())
+                if (d.inputChannels > 0)
+                {
+                    uids.add (d.uid);
+                    input.addItem (juce::String (d.name) + "  (" + juce::String (d.inputChannels) + " in)", uids.size());
+                    if (current == juce::String (d.uid)) input.setSelectedId (uids.size(), juce::dontSendNotification);
+                }
+            if (input.getSelectedId() == 0) input.setSelectedId (1, juce::dontSendNotification);
+            input.onChange = [this]
+            {
+                const auto uid = uids[input.getSelectedId() - 1];
+                owner.settings.getUserSettings()->setValue ("roomInput", uid.isEmpty() ? juce::String ("default") : uid);
+                owner.settingsDirty = true;
+                if (owner.roomButton.getToggleState()) owner.setRoom (true);      // restart the helper on the new input; the output is untouched
+            };
+            setSize (480, 440);
+        }
+        void paint (juce::Graphics& g) override { g.fillAll (kPanel); }
+        void resized() override
+        {
+            auto area = getLocalBounds().reduced (10);
+            note.setBounds (area.removeFromBottom (22));
+            auto row = area.removeFromBottom (28);
+            label.setBounds (row.removeFromLeft (110));
+            input.setBounds (row);
+            area.removeFromBottom (8);
+            selector.setBounds (area);
+        }
+        MainComponent& owner;
+        juce::AudioDeviceSelectorComponent selector;
+        juce::Label label, note;
+        juce::ComboBox input;
+        juce::StringArray uids;
+    };
+
     void showAudioSettings()
     {
-        auto* selector = new juce::AudioDeviceSelectorComponent (devices, 0, 0, 2, 2, false, false, true, false);
-        selector->setSize (480, 360);
         juce::DialogWindow::LaunchOptions o;
-        o.content.setOwned (selector);
-        o.dialogTitle = "Audio output";
+        o.content.setOwned (new AudioSettings (*this));
+        o.dialogTitle = "Audio settings";
         o.dialogBackgroundColour = kPanel;
         o.launchAsync();
     }
@@ -820,7 +927,10 @@ private:
     juce::uint32 wantedSince = 0, flashUntil = 0, lastSave = 0;
     bool settingsDirty = false;
     int ticks = 0;
-    juce::String roomMessage, outputOverride, snapshotPath;
+    juce::String roomMessage, roomDevice, outputOverride, snapshotPath;
+    std::unique_ptr<juce::DatagramSocket> roomSocket;
+    int roomPid = 0;
+    juce::uint32 roomStarted = 0, roomHeard = 0, roomListeningSince = 0;
 
     juce::String measurePath, measureLog;
     const bool transient;
@@ -842,6 +952,18 @@ public:
 
     void initialise (const juce::String& commandLine) override
     {
+        for (const auto& arg : juce::StringArray::fromTokens (commandLine, true))
+            if (arg.startsWith ("--probe="))       // diagnostic: which CoreAudio operation makes macOS ask for the microphone
+            {
+                probeMicrophoneTrigger (arg.fromFirstOccurrenceOf ("=", false, false).unquoted().toStdString(), []
+                {
+                    const auto a = microphoneAccess();
+                    return a == MicAccess::Granted ? "granted" : a == MicAccess::Denied ? "denied" : "undetermined";
+                });
+                return quit();
+            }
+
+        roomAtStart = commandLine.contains ("--room");
         juce::String measure;
         for (const auto& arg : juce::StringArray::fromTokens (commandLine, true))
             if (arg.startsWith ("--measure=")) measure = arg.fromFirstOccurrenceOf ("=", false, false).unquoted();

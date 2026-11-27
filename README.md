@@ -42,9 +42,13 @@ ctest --test-dir build
 open build/WILDBAND_artefacts/Release/WILDBAND.app
 ```
 
+The build puts `WILDBAND.app` and `WILDBAND Room.app` side by side; keep them together. WILDBAND Room is the small
+helper that holds the microphone permission for the optional ROOM feature. The instrument itself never asks for the
+microphone.
+
 Other tools: `build/wildband_radio_probe_artefacts/Release/wildband_radio_probe <url>...` tests stream addresses
 without an audio device; `WILDBAND.app/Contents/MacOS/WILDBAND --measure=FILE` runs the muted CoreAudio timing
 sweep (it changes the output device's sample rate and puts it back); `--mute` runs silently without touching saved
-settings. The Blender knob is rebuilt with the two commands at the top of `assets/blender/knob.py`.
+settings; `--probe=FILE` logs which CoreAudio operation, if any, makes macOS ask for the microphone. The Blender knob is rebuilt with the two commands at the top of `assets/blender/knob.py`.
 
 Licensing is undecided. JUCE is AGPLv3 or commercial; see `docs/p0/ARCHITECTURE.md`.

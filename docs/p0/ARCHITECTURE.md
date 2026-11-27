@@ -17,7 +17,7 @@ than the microphone, the final look.
             receiver thread                                   audio callback (CoreAudio)
 URL -> HTTP(S) fetch -> AudioToolbox parse/decode/resample -> bounded ring -> Radio::read (fades, never blocks) -+
                                                                                                                |
-microphone (only after the ROOM button + macOS consent) -> RoomAnalyser -> EnvBus (level, hits, brightness) ---+--> Engine -> output
+WILDBAND Room helper app (started by ROOM; mic -> RoomAnalyser) -> loopback UDP -> EnvBus (level, hits, bright) -+--> Engine -> output
 local test source (deterministic, labelled, never called "live") ----------------------------------------------+      ^
                                                                                                                        |
 knobs / MIDI CC / MIDI notes -> atomics ------------------------------------------------------------------------------+
@@ -29,7 +29,9 @@ patch bay -> Graph (validated on the message thread) -> RoutingPlan in one atomi
 | `src/Engine.h` | DSP engine, room analyser, environment bus, test source | C++ standard library only |
 | `src/Patch.h` | Typed ports, validated `Graph`, `RoutingPlan` (TALORA-style adapter) | C++ standard library only |
 | `src/Radio.{h,cpp}` | Stream receiver | `juce_core`, AudioToolbox |
-| `src/MicPermission.{h,mm}` | macOS microphone consent | AVFoundation |
+| `src/RoomHelper.mm` | **WILDBAND Room**, a separate app: the only process that uses the microphone. Asks for consent, analyses the chosen input, sends three numbers to the instrument | CoreAudio, AVFoundation; no JUCE |
+| `src/AudioIO.{h,cpp}` | Small CoreAudio layer: input capture for the helper, and the `--probe` diagnostic | CoreAudio, AudioToolbox |
+| `src/MicPermission.{h,mm}` | macOS microphone consent (requested by the helper only) | AVFoundation |
 | `src/Main.cpp` | App: audio/MIDI callbacks, placeholder UI, patch bay, settings, timing sweep | `juce_audio_utils` |
 | `tests/Tests.cpp` | Deterministic engine and patch tests | nothing (plain `clang++`) |
 | `tools/RadioProbe.cpp`, `tools/stream_test_server.py` | G1 evidence tools | `juce_core` / Python 3 |
@@ -46,7 +48,8 @@ solved one.
 | App shape | `juce_add_gui_app` standalone | The brief asks for a standalone instrument; no plugin wrapper to fight | `juce_add_plugin` + Standalone |
 | Stream decoding | macOS AudioToolbox (`AudioFileStream` + `AudioConverter`) | Ships with the OS: no codec library to license, vendor or build; the converter also resamples to the device rate | ffmpeg/mpg123/libopus (present on this Mac via Homebrew, but they would add dependencies and licence terms); JUCE's MP3 reader (file-oriented, off by default for licensing reasons) |
 | Networking | `juce::WebInputStream` (NSURLSession underneath) | HTTPS, redirects and timeouts for free | libcurl |
-| Mic consent | AVFoundation directly | `juce::RuntimePermissions` does nothing on macOS | — |
+| Mic consent | AVFoundation directly, in the helper | `juce::RuntimePermissions` does nothing on macOS | — |
+| Where the microphone lives | A separate helper app beside the instrument | An app that declares microphone use is prompted by macOS as soon as it opens an output device that has inputs. The instrument therefore declares none (`EVIDENCE-LOG.md`) | In-process capture through JUCE's device manager (the first attempt) |
 | Parameters | Plain atomics | There is no host; APVTS would be ceremony | APVTS |
 | Patch hand-off | One `std::atomic<uint64_t>` | The whole plan is seven bytes | Lock, FIFO, triple buffer |
 
@@ -91,7 +94,7 @@ on the same PITCH/SHAPE/TONE/DRIFT/FEEDBACK knobs). Mode changes cross-fade.
 | Retune responds at once | The old station starts fading on the `tune()` call; the resonators ring on while the new one connects |
 | Sample-rate change | The receiver restarts its session at the new rate; the callback is not involved |
 | NaN / runaway | Inputs sanitised, loops saturate, output clipped; a non-finite output block resets the engine and is counted (`faults`, shown in the status line; never seen) |
-| Mic denied / absent | ROOM stays neutral (0); the environment bus also reads neutral when a source goes stale for 1.5 s |
+| Mic denied / absent | ROOM switches itself off and stays neutral (0); playback is a different process and is unaffected. The environment bus also reads neutral when a source goes stale for 1.5 s |
 
 ## Environment abstraction
 
@@ -142,8 +145,8 @@ whether this particular instrument is good to play.
 ## Unresolved risks
 
 1. Nobody has listened to it. Everything about the sound is unproven until the owner plays it.
-2. macOS showed its microphone prompt while the app was opening the *output* device, and the app waited on it,
-   although no input was requested. The cause is not established (`EVIDENCE-LOG.md`, "Launch block").
+2. The microphone-prompt defect is fixed by moving capture into a helper app; that adds a second bundle, a
+   loopback UDP link (about 35 ms of extra latency on room values) and a re-prompt after each unsigned rebuild.
 3. Microphone plus speakers is a real acoustic loop through the control path, even with no mic audio in the output.
 4. The station and the Mac run on different clocks; nothing corrects the drift (see `RADIO-COMPATIBILITY.md`).
 5. Retuning takes 0.2–2 s of network time. The instrument covers it musically (fade, ring-out); whether that feels

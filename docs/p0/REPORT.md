@@ -19,8 +19,8 @@ A macOS standalone app (JUCE 9.0.5, C++20, CMake) in which:
 - a live MP3 or AAC internet radio stream is received, decoded by macOS and fed to the engine, with reconnection,
   station switching and status display;
 - the broadcast excites six tuned, coupled, saturating resonators (`ARCHITECTURE.md`);
-- the broadcast's own level and transients, and — after explicit opt-in — the room's level, onsets and brightness,
-  are control signals that can be patched into six resonator inputs with on-screen cables, while audio runs;
+- the broadcast's own level and transients, and — after explicit opt-in, through a separate helper app that alone
+  holds the microphone permission — the room's level, onsets and brightness, are control signals that can be patched into six resonator inputs with on-screen cables, while audio runs;
 - nine knobs, MIDI controllers (with learn) and MIDI notes play it;
 - DRY and REFERENCE (filter + delay) modes sit beside the engine for comparison;
 - nothing is recorded, stored or exported, and there is no control that would do so.
@@ -49,17 +49,18 @@ A macOS standalone app (JUCE 9.0.5, C++20, CMake) in which:
   lets it sustain past unity gain, and control inputs driven by the broadcast and the room. Whether a listener
   hears an instrument or an effect is exactly what the REFERENCE mode is there to settle. **If the two modes sound
   alike in the listening test, the concept as built has failed and should be reported as such**, not decorated.
-- **That the microphone works on hardware.** The analysis is tested on synthetic signals only. No real microphone
-  has been through it, and the permission flow has not been completed once.
+- **That the room signal is musically useful.** It now works on hardware (values from the MiniFuse input respond
+  to sound; the permission flow is verified), but nobody has played with it.
 - **That mouse or MIDI interaction feels right.** Neither has been used by a person.
 - **CoreAudio reliability in general.** One device, minutes not hours, no sleep/wake, no device switching.
 
 ## Defects and limitations found
 
-1. **macOS has asked for the microphone at launch, before ROOM is pressed, and the app waits until the prompt is
-   answered.** This breaks the "no automatic microphone permission" requirement (PRD P0-08). The cause is not
-   established (an output device that also has inputs is the suspect), it did not happen on every launch, and the
-   "Don't Allow" path has never been run. An on-screen note was added; nothing is fixed (`EVIDENCE-LOG.md`).
+1. **Fixed: macOS asked for the microphone at launch, and denying it left no output.** Cause established: an app
+   that declares microphone use is prompted as soon as it opens a device that has inputs, even for playback. The
+   instrument now declares none; ROOM runs in a separate helper app with its own permission. Verified on fresh,
+   denied and granted permissions (`EVIDENCE-LOG.md`). Residue: two apps side by side, and macOS asks again about
+   the helper after each unsigned rebuild.
 2. The radio is several seconds behind the broadcast (up to 6 s of buffer).
 3. Station and Mac clocks are not synchronised; a slow station will eventually cause a 0.75 s re-buffer.
 4. Ogg/Opus/FLAC and HLS streams are refused. Some stations only offer those.
@@ -88,8 +89,8 @@ Not decided here; it depends on the listening sessions. The prototype is built s
 
 Technical:
 
-1. What actually triggers the microphone prompt at launch, and can the output be opened without it?
-2. Does "Don't Allow" leave the output working? Does revoking access mid-session?
+1. Should the helper stay a separate app, or become a signed XPC service once there is a Developer ID?
+2. What happens when microphone access is revoked while ROOM is on?
 3. How should clock drift be handled over a long session: adaptive resampling, or let the buffer breathe?
 4. Is a 6 s buffer the right trade between resilience and "live"? Would 1–2 s survive real networks?
 5. What happens on sleep/wake, on losing Wi-Fi, on unplugging the interface?
