@@ -37,6 +37,8 @@ Start with a *small* network: streaming audio excitation -> resonant/nonlinear v
 
 Do not overcommit to spectral, granular or complex physically modeled DSP until listening tests support it. Conduct an A/B against a generic filter-and-delay chain.
 
+Post-P0, evaluate AFTERIMAGE's CLOUD scheduler, TRACE-to-CLOUD DISSOLVE and optional spectral guidance as a continuously fed, patchable granular delay, without its user capture/IMPRINT workflow. See [`AFTERIMAGE-DSP-REUSE.md`](AFTERIMAGE-DSP-REUSE.md) for the verified prior research, realtime gate failures, licensing review, and live-stream adaptation proposal. This does not modify P0 scope.
+
 ## Follow-up patch utilities (research only)
 
 After P0 owner audition, explore an auxiliary mixer with deliberately bounded feedback paths and a configurable audio envelope follower/gate. Later consider an environmental SENSE scale/offset/polarity/smoothing utility and a Drift-derived organic random CV modulator (with a simple LFO as a separate fallback if musically needed). Reuse TALORA's typed audio/CV and real-time-safe graph patterns only after inspecting actual implementation and porting costs. A field pickup connected via an audio interface is a potential future true environmental *audio* source; motors/solenoids require external hardware. Drift's current implementation uses a Vult-generated, stateful pseudo-random algorithm and requires license, dependency, scaling and real-time qualification before porting. See [`FIELD-KIT-INSPIRED-UTILITIES.md`](FIELD-KIT-INSPIRED-UTILITIES.md). This proposal does not modify the current P0 gate or imply these features work.
