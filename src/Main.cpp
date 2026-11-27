@@ -48,13 +48,13 @@ public:
         for (int i = 0; i < kNumParams; ++i) params[(size_t) i] = paramDefaults[i];
         params[kTune] = dialCentre (0, kNumStations);
         for (auto& c : ccMap) c = -1;      // no controller is mapped until MIDI LEARN maps one: no guessed defaults
-        plan = RoutingPlan::fromGraph (Graph::defaultPatch()).pack();
+        plans.publish (RoutingPlan::fromGraph (Graph::defaultPatch()));
     }
 
     // ---- shared state
     std::array<std::atomic<float>, kNumParams> params;
     std::atomic<int> mode { 0 };
-    std::atomic<uint64_t> plan { 0 };                       // RoutingPlan::pack, written by the patch bay
+    PlanMailbox plans;                                      // written by the patch bay (message thread), read by the callback
     std::atomic<bool> roomEnabled { false }, panic { false }, stallOnce { false };   // stallOnce: --measure positive control only
     std::array<std::atomic<int8_t>, 128> ccMap;             // controller number -> Param, -1 = unmapped
     std::atomic<int> learnTarget { -1 }, midiEvents { 0 };
@@ -112,7 +112,7 @@ public:
         for (int i = 0; i < kNumParams; ++i) c.p[i] = params[(size_t) i].load (std::memory_order_relaxed);
         c.mode = (Mode) mode.load (std::memory_order_relaxed);
         c.detune = dial (c.p[kTune], kNumStations).offCentre;
-        c.plan = RoutingPlan::unpack (plan.load (std::memory_order_relaxed));
+        c.plan = plans.read();                              // whole plan or the previous whole plan, never a mixture
         const auto nowMs = (int64_t) juce::Time::getMillisecondCounter();
 
         for (int at = 0; at < n; at += kScratch)
@@ -183,6 +183,20 @@ private:
 // ---------------------------------------------------------------------------------------------------------------------
 struct Look final : juce::LookAndFeel_V4
 {
+    /** The DEPTH slider: a track with a centre mark, filled from the centre toward the thumb. */
+    void drawLinearSlider (juce::Graphics& g, int x, int y, int w, int h, float pos, float minPos, float maxPos, juce::Slider::SliderStyle style, juce::Slider& s) override
+    {
+        if (! s.getProperties().contains ("bipolar")) return LookAndFeel_V4::drawLinearSlider (g, x, y, w, h, pos, minPos, maxPos, style, s);
+        const float midY = (float) y + (float) h * 0.5f, centre = (float) x + (float) w * 0.5f;
+        g.setColour (kPanel.brighter (0.5f));
+        g.fillRoundedRectangle ((float) x, midY - 3.0f, (float) w, 6.0f, 3.0f);
+        g.setColour (pos >= centre ? kOrange : kRadio);                       // also told apart by side and by the signed number
+        g.fillRect (juce::Rectangle<float>::leftTopRightBottom (juce::jmin (pos, centre), midY - 3.0f, juce::jmax (pos, centre), midY + 3.0f));
+        g.setColour (kText);
+        g.fillRect (centre - 1.0f, midY - 9.0f, 2.0f, 18.0f);
+        g.fillEllipse (juce::Rectangle<float> (14.0f, 14.0f).withCentre ({ pos, midY }));
+    }
+
     juce::Image knobStrip;   // optional Blender-rendered filmstrip (vertical, square frames), used by the TUNE knob
 
     void drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h, float pos, float a0, float a1, juce::Slider& s) override
@@ -248,7 +262,8 @@ struct StationDial final : juce::Component
 struct PatchBay final : juce::Component, juce::SettableTooltipClient
 {
     Graph graph = Graph::defaultPatch();
-    std::function<void()> onChange;
+    int selected = -1;                             // input port of the selected cable (an input has at most one), or -1
+    std::function<void()> onChange, onSelect;
     std::function<void (const juce::String&)> onMessage;
     std::function<float (int port)> valueOf;      // live 0..1 value of an output port
 
@@ -262,6 +277,24 @@ struct PatchBay final : juce::Component, juce::SettableTooltipClient
     {
         for (int i = 0; i < kNumPorts; ++i) if (socket (i).getDistanceFrom (p) < 22.0f) return i;
         return -1;
+    }
+    /** The cable under `p` (as its input port), or -1. */
+    int cableAt (juce::Point<float> p) const
+    {
+        for (int i = graph.size(); --i >= 0;)
+        {
+            juce::Point<float> nearest;
+            cable (socket (graph[i].from), socket (graph[i].to)).getNearestPoint (p, nearest);
+            if (nearest.getDistanceFrom (p) < 10.0f) return graph[i].to;
+        }
+        return -1;
+    }
+    void select (int input)
+    {
+        if (input >= 0 && graph.cableInto (input) < 0) input = -1;
+        selected = input;
+        if (onSelect) onSelect();
+        repaint();
     }
     static juce::Path cable (juce::Point<float> a, juce::Point<float> b)
     {
@@ -304,9 +337,31 @@ struct PatchBay final : juce::Component, juce::SettableTooltipClient
         for (int i = 0; i < graph.size(); ++i)
         {
             const auto c = graph[i];
-            const float v = valueOf (c.from);
-            g.setColour (moduleColour (ports[c.from].module).withAlpha (0.45f + 0.55f * v));
-            g.strokePath (cable (socket (c.from), socket (c.to)), juce::PathStrokeType ((ports[c.from].type == PortType::Audio ? 5.0f : 3.0f) + 3.0f * v, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            const bool audio = ports[c.from].type == PortType::Audio;
+            const float amount = std::abs (c.depth), v = valueOf (c.from) * amount;          // a cable at depth 0 carries nothing and looks it
+            const auto path = cable (socket (c.from), socket (c.to));
+            const juce::PathStrokeType stroke ((audio ? 5.0f : 2.0f + 1.5f * amount) + 3.0f * v, juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
+            juce::Path drawn;
+            if (c.depth < 0.0f) { const float dashes[] = { 9.0f, 7.0f }; stroke.createDashedStroke (drawn, path, dashes, 2); }   // inverted cables are dashed
+            else stroke.createStrokedPath (drawn, path);
+            if (c.to == selected)
+            {
+                g.setColour (juce::Colours::white.withAlpha (0.9f));
+                g.strokePath (path, juce::PathStrokeType (stroke.getStrokeThickness() + 5.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            }
+            g.setColour (moduleColour (ports[c.from].module).withAlpha (0.3f + 0.25f * amount + 0.45f * v));
+            g.fillPath (drawn);
+            if (! audio && (c.to == selected || std::abs (c.depth - 1.0f) > 0.005f))          // signed amount on any cable that is not at the default
+            {
+                const auto mid = path.getPointAlongPath (path.getLength() * 0.55f);
+                const auto text = (c.depth > 0.0f ? "+" : "") + juce::String (juce::roundToInt (c.depth * 100.0f)) + " %";
+                const auto badge = juce::Rectangle<float> (46.0f, 16.0f).withCentre (mid);
+                g.setColour (kBack.withAlpha (0.85f));
+                g.fillRoundedRectangle (badge, 4.0f);
+                g.setColour (c.to == selected ? juce::Colours::white : kText.withAlpha (0.8f));
+                g.setFont (11.0f);
+                g.drawText (text, badge, juce::Justification::centred);
+            }
         }
         if (dragFrom >= 0)
         {
@@ -315,23 +370,36 @@ struct PatchBay final : juce::Component, juce::SettableTooltipClient
         }
     }
 
+    // Click a cable (or an occupied input) to select it for the DEPTH control. Drag from an output to patch. Drag a
+    // cable off its input to move it - it keeps its depth - or drop it in space to pull it out.
     void mouseDown (const juce::MouseEvent& e) override
     {
+        pressAt = dragAt = e.position;
+        pendingInput = -1;
         const int port = socketAt (e.position);
-        if (port < 0) return;
-        if (port < kFirstInput) dragFrom = port;
-        else if (const int source = graph.cableInto (port); source >= 0)      // pick the cable up by its input end
+        if (port < 0) return select (cableAt (e.position));                    // a cable, or empty space (deselects)
+        if (port < kFirstInput) { dragFrom = port; dragDepth = 1.0f; }
+        else if (graph.cableInto (port) >= 0) pendingInput = port;             // decided on release: click selects, drag picks up
+        repaint();
+    }
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (pendingInput >= 0 && e.position.getDistanceFrom (pressAt) > 6.0f)  // it is a drag: pick the cable up by its input end
         {
-            graph.disconnect (source, port);
-            dragFrom = source;
+            dragFrom = graph.cableInto (pendingInput);
+            dragDepth = graph.depthInto (pendingInput);
+            graph.disconnect (dragFrom, pendingInput);
+            pendingInput = -1;
+            select (-1);
             changed();
         }
         dragAt = e.position;
+        hover = socketAt (e.position);
         repaint();
     }
-    void mouseDrag (const juce::MouseEvent& e) override { dragAt = e.position; hover = socketAt (e.position); repaint(); }
     void mouseUp (const juce::MouseEvent& e) override
     {
+        if (pendingInput >= 0) { const int input = pendingInput; pendingInput = -1; return select (input); }
         if (dragFrom < 0) return;
         if (const int to = socketAt (e.position); to >= 0 && to != dragFrom)
         {
@@ -341,18 +409,22 @@ struct PatchBay final : juce::Component, juce::SettableTooltipClient
                 graph.disconnect (graph.cableInto (to), to);
                 error = graph.check (dragFrom, to);
             }
-            if (error == ConnectError::None) graph.connect (dragFrom, to);
+            if (error == ConnectError::None) graph.connect (dragFrom, to, dragDepth);
             if (onMessage) onMessage (error == ConnectError::None ? juce::String (ports[dragFrom].id) + " -> " + ports[to].id : juce::String ("Not patched: ") + describe (error));
             changed();
+            dragFrom = hover = -1;
+            return select (error == ConnectError::None ? to : -1);             // a new cable is selected, ready for DEPTH
         }
         dragFrom = hover = -1;
+        if (selected >= 0 && graph.cableInto (selected) < 0) select (-1);
         repaint();
     }
 
 private:
     void changed() { if (onChange) onChange(); }
-    int dragFrom = -1, hover = -1;
-    juce::Point<float> dragAt;
+    int dragFrom = -1, hover = -1, pendingInput = -1;
+    float dragDepth = 1.0f;
+    juce::Point<float> dragAt, pressAt;
 };
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -452,7 +524,29 @@ public:
                 default:                 return 0.0f;
             }
         };
-        patch.onChange = [this] { instrument.plan = RoutingPlan::fromGraph (patch.graph).pack(); settingsDirty = true; };
+        patch.onChange = [this] { instrument.plans.publish (RoutingPlan::fromGraph (patch.graph)); settingsDirty = true; };
+        patch.onSelect = [this] { showDepthFor (patch.selected); };
+
+        depth.setSliderStyle (juce::Slider::LinearHorizontal);
+        depth.setRange (-100.0, 100.0, 1.0);
+        depth.setTextBoxStyle (juce::Slider::TextBoxRight, false, 58, 22);
+        depth.setTextValueSuffix (" %");
+        depth.setDoubleClickReturnValue (true, 0.0);          // centre: no influence
+        depth.getProperties().set ("bipolar", true);
+        depth.setTitle ("DEPTH");
+        depth.setTooltip ("How strongly, and which way, the selected cable acts. Double-click for 0; +100 is the original behaviour.");
+        depth.onValueChange = [this]
+        {
+            const int to = patch.selected, from = patch.graph.cableInto (to);
+            if (from < 0) return;
+            patch.graph.setDepth (from, to, (float) depth.getValue() / 100.0f);      // validated and clamped by Graph
+            patch.onChange();
+            patch.repaint();
+        };
+        addChildComponent (depth);
+        addChildComponent (depthRoute);
+        depthRoute.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+        depthRoute.setJustificationType (juce::Justification::centredRight);
         patch.onMessage = [this] (const juce::String& m) { flash (m); };
         patch.onChange();
 
@@ -525,9 +619,11 @@ public:
         auto buttons = area.removeFromTop (28);
         for (auto& m : modes) { m.setBounds (buttons.removeFromLeft (110)); buttons.removeFromLeft (4); }
         buttons.removeFromLeft (20);
-        roomButton.setBounds (buttons.removeFromLeft (170));
-        learn.setBounds (buttons.removeFromLeft (120));
+        roomButton.setBounds (buttons.removeFromLeft (165));
+        learn.setBounds (buttons.removeFromLeft (115));
         hint.setBounds (buttons);
+        depthRoute.setBounds (buttons.removeFromLeft (juce::jmin (230, buttons.getWidth() / 2)));      // the DEPTH strip takes the hint's place while a cable is selected
+        depth.setBounds (buttons.reduced (4, 0));
 
         area.removeFromTop (8);
         patch.setBounds (area);
@@ -544,6 +640,13 @@ private:
             out.setPosition (0);
             out.truncate();
             juce::PNGImageFormat().writeImageToStream (createComponentSnapshot (getLocalBounds(), true, 2.0f), out);
+            patch.graph.setDepth (patch.graph.cableInto (kResFeedbackIn), kResFeedbackIn, -0.35f);   // and once more with a cable selected and inverted
+            patch.graph.setDepth (patch.graph.cableInto (kResDriftIn), kResDriftIn, 0.5f);
+            patch.select (kResFeedbackIn);
+            juce::FileOutputStream out3 { juce::File (snapshotPath).getSiblingFile (juce::File (snapshotPath).getFileNameWithoutExtension() + "-depth.png") };
+            out3.setPosition (0);
+            out3.truncate();
+            juce::PNGImageFormat().writeImageToStream (createComponentSnapshot (getLocalBounds(), true, 2.0f), out3);
             AudioSettings dialog (*this);                    // and the audio settings dialog, beside it
             dialog.setLookAndFeel (&look);
             juce::FileOutputStream out2 { juce::File (snapshotPath).getSiblingFile (juce::File (snapshotPath).getFileNameWithoutExtension() + "-audio.png") };
@@ -631,6 +734,23 @@ private:
             const auto error = devices.setAudioDeviceSetup (setup, true);
             if (statusLogPath.isNotEmpty()) juce::File (statusLogPath).appendText ("-- output " + before + " -> " + setup.outputDeviceName + (error.isEmpty() ? " ok" : " FAILED: " + error) + "\n");
         }
+    }
+
+    /** Shows the DEPTH strip for the cable into `input` (a control input), or hides it. */
+    void showDepthFor (int input)
+    {
+        const int from = input >= 0 ? patch.graph.cableInto (input) : -1;
+        const bool control = from >= 0 && ports[input].type == PortType::CV;
+        depth.setVisible (control);
+        depthRoute.setVisible (control);
+        hint.setVisible (! control);
+        if (control)
+        {
+            depth.setValue (std::round (patch.graph.depthInto (input) * 100.0f), juce::dontSendNotification);
+            depthRoute.setText (juce::String ("DEPTH  ") + moduleNames[ports[from].module] + " " + ports[from].label + " > " + ports[input].label, juce::dontSendNotification);
+            depthRoute.setColour (juce::Label::textColourId, moduleColour (ports[from].module));
+        }
+        else if (from >= 0) flash ("Audio cables have no depth. Select a round (control) cable.");
     }
 
     void flash (const juce::String& m) { hint.setText (m, juce::dontSendNotification); flashUntil = juce::Time::getMillisecondCounter() + 3000; }
@@ -835,12 +955,8 @@ private:
             }
         }
         instrument.params[kLevel] = juce::jmin (instrument.params[kLevel].load(), paramDefaults[kLevel]);   // never start loud
-        if (p.containsKey ("cables"))
-        {
-            patch.graph.clear();
-            for (const auto& cable : juce::StringArray::fromTokens (p.getValue ("cables"), ";", ""))     // "from|to", TALORA's cable id format
-                patch.graph.connect (findPort (cable.upToFirstOccurrenceOf ("|", false, false).toRawUTF8()), findPort (cable.fromFirstOccurrenceOf ("|", false, false).toRawUTF8()));
-        }
+        // "cables" stays in P0's format so both builds can share one settings file; depths live under their own key
+        if (p.containsKey ("cables")) patch.graph = loadPatch (p.getValue ("cables").toStdString(), p.getValue ("cableDepths").toStdString());
         wanted = tuned = dial (instrument.params[kTune].load(), kNumStations).station;
         instrument.radio.tune (stations[(size_t) tuned].url);
         urlEditor.setText (stations[(size_t) tuned].url, false);
@@ -858,9 +974,8 @@ private:
             for (int n = 0; n < 128; ++n) if (instrument.ccMap[(size_t) n].load() == i) cc = n;
             p.setValue (juce::String ("cc") + paramNames[i], cc);
         }
-        juce::StringArray cables;
-        for (int i = 0; i < patch.graph.size(); ++i) cables.add (juce::String (ports[patch.graph[i].from].id) + "|" + ports[patch.graph[i].to].id);
-        p.setValue ("cables", cables.joinIntoString (";"));
+        p.setValue ("cables", juce::String (savePatch (patch.graph)));
+        p.setValue ("cableDepths", juce::String (savePatch (patch.graph, true)));
         if (auto xml = devices.createStateXml()) p.setValue ("audio", xml.get());
         p.saveIfNeeded();
         settingsDirty = false;
@@ -946,7 +1061,8 @@ private:
     juce::ToggleButton roomButton, learn;
     juce::TextButton audioButton, panicButton, setUrl;
     juce::TextEditor urlEditor;
-    juce::Label title, status, hint;
+    juce::Label title, status, hint, depthRoute;
+    juce::Slider depth;
     StationDial dialView;
     PatchBay patch;
 

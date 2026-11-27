@@ -62,7 +62,7 @@ The test is optional because it needs the private repository; WILDBAND builds wi
 | Normalling | Inputs have built-in sources; normals can be broken | None: the default patch is made of real cables | So that every connection, including radio → resonator, can be pulled out by hand |
 | Cycle check | Yes | Not needed: no module has both inputs and outputs | Must be added with the first such module |
 | Capacity | 64 cables, 256 ports | 16 cables, 14 ports | — |
-| Plan hand-off | Triple buffer, adopted at a block boundary | One atomic 64-bit word, read each callback | The plan is 7 bytes. Both are wait-free |
+| Plan hand-off | Triple buffer, adopted at a block boundary | P0: one atomic 64-bit word. **From the attenuverter branch: `PlanMailbox` in `src/Patch.h`, the same three-slot exchange as TALORA's `setRouting` / `adoptRouting`** (three slots, an index mask and a "fresh" flag in one atomic, the same initial indices and memory orders) | With depths the plan no longer fits one word. The three-slot "latest value" exchange is a standard technique, but this implementation was written with TALORA's in view and matches it closely, so it is **derived from TALORA, like `Graph::check`**. The owner's earlier go-ahead covered the first push only; this addition is flagged for the owner in PR 4 |
 | Glitch-free re-patching | Plan swap at an island boundary | Every input cross-fades or glides to its new source (20–30 ms) | Tested: `patching`, 40 random re-patches, no step above 0.03 |
 | Undo, revisions, transactions | Yes | No | Not needed for one small patch bay |
 | A cable dropped on an occupied input | Rejected (`FanIn`) | The UI pulls the old cable (a validated disconnect) and plugs the new one | Performance gesture; the `Graph` rule itself is unchanged |
