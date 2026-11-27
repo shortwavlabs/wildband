@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Stephane P. Pericat
 // macOS microphone authorisation (AVFoundation). JUCE's RuntimePermissions does nothing on macOS.
 #pragma once
 #include <functional>

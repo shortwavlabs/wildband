@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Stephane P. Pericat
 #include "AudioIO.h"
 
 #include <AudioToolbox/AudioToolbox.h>

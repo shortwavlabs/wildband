@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Stephane P. Pericat
 // FROZEN COPY of src/Engine.h at 9c0a409 (the build the owner auditioned on 2026-11-27), in namespace wildband_baseline.
 // Used only by the tests, as the reference for "depth +100 % reproduces the original behaviour". Do not edit.
 // WILDBAND P0 engine. No JUCE, no allocation after prepare(), no locks: driven by the audio callback only.

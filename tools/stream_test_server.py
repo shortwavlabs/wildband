@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Stephane P. Pericat
 """Local stand-in for awkward radio servers, for the G1 protocol tests (docs/p0/RADIO-COMPATIBILITY.md).
 
     python3 -I tools/stream_test_server.py clip.mp3 [port [clipB.mp3 clipC.mp3]]

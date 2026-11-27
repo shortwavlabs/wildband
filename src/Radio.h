@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Stephane P. Pericat
 // WILDBAND P0 radio receiver: one HTTP(S) Icecast/Shoutcast-style stream -> AudioToolbox decode and resample ->
 // bounded PCM ring -> audio thread. Everything except read() runs on the receiver's own thread.
 // What is and is not supported: docs/p0/RADIO-COMPATIBILITY.md

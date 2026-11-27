@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Stephane P. Pericat
 // "WILDBAND Room": the only WILDBAND process that may use the microphone.
 //
 // Why a separate app: macOS shows the microphone prompt to any app that declares microphone use as soon as it opens

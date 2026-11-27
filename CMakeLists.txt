@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Stephane P. Pericat
 cmake_minimum_required(VERSION 3.22)
 project(WILDBAND VERSION 0.0.1 LANGUAGES C CXX)
 
@@ -54,6 +56,9 @@ add_dependencies(WILDBAND wildband_room)
 add_custom_command(TARGET WILDBAND POST_BUILD VERBATIM
     COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_BUNDLE_DIR:WILDBAND>/../WILDBAND Room.app"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_BUNDLE_DIR:wildband_room>" "$<TARGET_BUNDLE_DIR:WILDBAND>/../WILDBAND Room.app"
+    # AGPL: the licence and third-party notices travel inside the bundle (docs/LICENSING.md)
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" "${CMAKE_CURRENT_SOURCE_DIR}/THIRD-PARTY-NOTICES.md" "$<TARGET_BUNDLE_DIR:WILDBAND>/Contents/Resources/"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/licenses" "$<TARGET_BUNDLE_DIR:WILDBAND>/Contents/Resources/licenses"
     COMMAND codesign --force --sign - "$<TARGET_BUNDLE_DIR:WILDBAND>/../WILDBAND Room.app"
     COMMAND codesign --force --sign - "$<TARGET_BUNDLE_DIR:WILDBAND>")
 

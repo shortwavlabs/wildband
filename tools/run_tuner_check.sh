@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Stephane P. Pericat
 # Runs the receiver-level tuner tests: makes three short tone clips, starts the local test server, runs
 # wildband_tuner_check against it, stops the server. Needs ffmpeg and python3. Usage: tools/run_tuner_check.sh [build-dir]
 set -e

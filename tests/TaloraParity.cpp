@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Stephane P. Pericat
 // Optional (cmake -DTALORA_DIR=/path/to/modulo): drives WILDBAND's Graph (src/Patch.h) and TALORA's real Graph
 // (modulo/src/engine/Routing.cpp) with the same port registry and the same random edits, and requires the same
 // verdict and the same resulting patch every time. Exit code = number of disagreements.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Stephane P. Pericat
 // WILDBAND P0 standalone app: audio callback, MIDI, placeholder performance UI and patch bay.
 // The UI is deliberately plain (docs/UI-AND-BLENDER-DIRECTION.md: interaction first). `--measure=FILE` runs the
 // CoreAudio timing sweep used for docs/p0/EVIDENCE-LOG.md and quits.
