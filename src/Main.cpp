@@ -554,7 +554,7 @@ private:
         }
         if (ticks == 8) openAudio();            // a quarter of a second after the window appears
         if (ticks == 150 && roomAtStart) { roomButton.setToggleState (true, juce::dontSendNotification); setRoom (true); }   // --room (test aid): press ROOM after 5 s
-        if (roomAtStart && instrument.roomEnabled.load() && roomListeningSince != 0 && juce::Time::getMillisecondCounter() - roomListeningSince > 10000)
+        if (roomAtStart && measurePath.isEmpty() && instrument.roomEnabled.load() && roomListeningSince != 0 && juce::Time::getMillisecondCounter() - roomListeningSince > 10000)
         {
             roomAtStart = false;                                                 // ...and switch it off again 10 s after it starts listening
             roomButton.setToggleState (false, juce::dontSendNotification);
@@ -857,7 +857,7 @@ private:
         auto* device = devices.getCurrentAudioDevice();
         measureLog << "Device: " << (device != nullptr ? device->getName() : "none") << ", " << juce::SystemStats::getOperatingSystemName() << ", " << juce::SystemStats::getDeviceDescription()
                    << ", " << juce::Time::getCurrentTime().toISO8601 (true) << "\n\n"
-                   << "| rate | buffer (asked/got) | period ms | callbacks | mean us | p99.9 us | max us | max % of period | late callbacks | max host-time gap ms | radio underruns | reconnects | engine faults | radio state at end | buffered s | radio level 0..1 |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n";
+                   << "| rate | buffer (asked/got) | period ms | callbacks | mean us | p99.9 us | max us | max % of period | late callbacks | max host-time gap ms | radio underruns | reconnects | engine faults | radio LIVE % of window | mean radio level 0..1 | ROOM on % of window | mean room level 0..1 |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n";
         measureOriginal = devices.getAudioDeviceSetup();
         measureIndex = -1;
         measureNext = juce::Time::getMillisecondCounter() + 6000;      // let the stream start first
@@ -865,6 +865,14 @@ private:
     void stepMeasure()
     {
         const auto now = juce::Time::getMillisecondCounter();
+        if (! measureSettling)      // what the engine was actually fed during the window, sampled 30 times a second
+        {
+            ++measureTicks;
+            measureLive += instrument.radio.state() == Radio::State::Playing;
+            measureRadioLevel += instrument.engine.meterRadioLevel.load();
+            measureRoom += instrument.roomEnabled.load();
+            measureRoomLevel += instrument.roomLevel.load();
+        }
         if (now < measureNext) return;
         if (measureStalling)
         {
@@ -877,7 +885,7 @@ private:
             juce::JUCEApplication::quit();
             return;
         }
-        if (measureSettling) { instrument.perf.reset(); underruns0 = instrument.radio.underruns.load(); reconnects0 = instrument.radio.reconnects.load(); measureSettling = false; measureNext = now + 20000; return; }
+        if (measureSettling) { measureTicks = measureLive = measureRoom = 0; measureRadioLevel = measureRoomLevel = 0; instrument.perf.reset(); underruns0 = instrument.radio.underruns.load(); reconnects0 = instrument.radio.reconnects.load(); measureSettling = false; measureNext = now + 20000; return; }
         if (measureIndex >= 0)
         {
             const auto& step = measureSteps.getReference (measureIndex);
@@ -887,7 +895,8 @@ private:
                        << " | " << juce::String (perf.sumUs.load() / n, 1) << " | " << juce::roundToInt (perf.percentileUs (0.999)) << " | " << juce::roundToInt (perf.maxUs.load())
                        << " | " << juce::String (period > 0 ? perf.maxUs.load() / (period * 10.0) : 0.0, 1) << " | " << (juce::int64) perf.lateCallbacks.load() << " | " << juce::String (perf.maxGapMs.load(), 2)
                        << " | " << instrument.radio.underruns.load() - underruns0 << " | " << instrument.radio.reconnects.load() - reconnects0 << " | " << instrument.engine.faults.load()
-                       << " | " << Radio::name (instrument.radio.state()) << " | " << juce::String (instrument.radio.bufferedSeconds(), 1) << " | " << juce::String (instrument.engine.meterRadioLevel.load(), 2) << " |\n";
+                       << " | " << juce::roundToInt (100.0 * measureLive / juce::jmax (1, measureTicks)) << " | " << juce::String (measureRadioLevel / juce::jmax (1, measureTicks), 2)
+                       << " | " << juce::roundToInt (100.0 * measureRoom / juce::jmax (1, measureTicks)) << " | " << juce::String (measureRoomLevel / juce::jmax (1, measureTicks), 2) << " |\n";
         }
         if (++measureIndex >= measureSteps.size())
         {
@@ -938,6 +947,8 @@ private:
     juce::AudioDeviceManager::AudioDeviceSetup measureOriginal;
     int measureIndex = -1, underruns0 = 0, reconnects0 = 0;
     bool measureSettling = false, measureStalling = false;
+    int measureTicks = 0, measureLive = 0, measureRoom = 0;
+    double measureRadioLevel = 0, measureRoomLevel = 0;
     juce::uint32 measureNext = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
