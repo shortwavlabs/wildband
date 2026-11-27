@@ -29,6 +29,7 @@ All network, parsing, codec negotiation, sensor discovery, permissions and graph
 - **Wi-Fi:** CoreWLAN and OS entitlements/permissions constrain accessible scan/signal info; feasibility unknown.
 - **Raw RF:** not available with standard Wi-Fi/BLE hardware; investigate optional external SDR separately if musical value is established.
 - **Ambient light:** availability and public API support are device dependent; research only.
+- **iPhone WORLD bridge (post-P0 research):** optional local sensor/gesture stream (magnetometer, acceleration, rotation and relative tilt). First validate an existing sensor-to-OSC sender with a narrow Mac receiver, then consider a dedicated companion with explicit pairing. See [`PHONE-WORLD-BRIDGE.md`](PHONE-WORLD-BRIDGE.md) for sensor semantics, privacy, stale-data behavior and musical acceptance. No phone or local-network permission is required for normal Mac playback.
 
 ## DSP candidate
 
