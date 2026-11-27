@@ -21,7 +21,9 @@ Open the standalone app; hear a safe default. Tune a live Icecast/Shoutcast-comp
 | P0-09 | Play test | Owner spends 15+ minutes, can intentionally achieve three audibly different states and wants to return |
 | P0-10 | Design workflow proof | One Blender-rendered control integrated with live JUCE hit testing, automation and resize behavior |
 
-**P1 options, only after P0:** second independent stream with cross-modulation, weather data as optional slow control signal, Bluetooth RSSI experiment, Wi-Fi API feasibility, deeper modulation patching, native AU/VST3.
+**Post-P0 RADIO requirement:** worldwide searchable station directory, up to six ordered stations per patch/set and at most two independent live receivers (including audition/retune sessions), with manual URLs and provider-independent saved sets. See [WORLD-RADIO-CATALOG.md](WORLD-RADIO-CATALOG.md). P0 remains single receiver.
+
+**P1 options, only after P0:** weather data as optional slow control signal, Bluetooth RSSI experiment, Wi-Fi API feasibility, deeper modulation patching, native AU/VST3.
 
 **Field Kit-inspired follow-ups (proposed, not added to P0):** prioritize (1) auxiliary mixer and bounded feedback routing and (2) adjustable envelope follower + gate as first musical experiments after owner P0 audition. Evaluate (3) sensor/CV calibration and (4) a minimal LFO later; optional electromagnetic/contact pickup inputs and external actuators are future hardware investigations. Use TALORA's typed patching architecture where qualified. See [`FIELD-KIT-INSPIRED-UTILITIES.md`](FIELD-KIT-INSPIRED-UTILITIES.md) for rationale, safety limits and patch-recipe ideas.
 
