@@ -26,7 +26,7 @@ Create the *desire to touch* that the user associates with Teenage Engineering, 
 - Support mouse/trackpad and MIDI controllers equally; no requirement to own external hardware.
 - Use Blender for high-quality **static objects and state sprites**, not full real-time 3D at audio rate.
 - Avoid direct copies of OP-1, Field Kit, 0-Coast or Musyc industrial design or trade dress.
-- **No recording/capture/export button** as a primary visual element.
+- **No full-performance recording/export controls.** The post-P0 [LOOP](TAPESTRY-LOOPER-RESEARCH.md) exception may expose a compact CAPTURE/PLAY/CHOP/CLEAR interaction, truthful waveform/playhead and volatile-memory status. Final geometry follows audition.
 
 ## Prototype art directions to explore only after interaction proof
 
