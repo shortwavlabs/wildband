@@ -453,6 +453,7 @@ template <typename G> G wire (std::initializer_list<Cable> cables) { G g; for (a
 const std::initializer_list<Cable> kAudio = { { kRadioAudioOut, kResAudioIn } };
 
 struct Run { Buf out; std::vector<float> f0, f1; };
+float strikeDefaultDifferenceDb = 0, strikeDefaultLevelDb = 0;   // ST-04, reported by --metrics
 
 /** Radio = pings and bursts plus hiss; local = other noise. `track`: also record resonator frequencies per block. */
 Run render (const RoutingPlan& plan, Controls c, double fs = 48000.0, double seconds = 2.0, double inputSeconds = 1.0e9)
@@ -492,11 +493,13 @@ void legacyParity()   // AT-01
 {
     currentTest = "AT-01 legacy parity";
     namespace base = wildband_baseline;
+    // Since the STRIKE correction (docs/p0/STRIKE-NEUTRAL.md) a cable in STRIKE is intentionally NOT sample-identical
+    // to P0, so exact parity is required for every other destination; STRIKE has its own tests in strikeNeutral().
     const std::initializer_list<Cable> patches[] = {
-        { { kRadioAudioOut, kResAudioIn }, { kRadioActivityOut, kResExciteIn }, { kRadioLevelOut, kResDampIn }, { kRadioLevelOut, kResDriftIn },
-          { kRoomLevelOut, kResFeedbackIn }, { kRoomActivityOut, kResPitchIn }, { kRoomBrightnessOut, kResShapeIn } },                       // the default patch
+        { { kRadioAudioOut, kResAudioIn }, { kRadioLevelOut, kResDampIn }, { kRadioLevelOut, kResDriftIn },
+          { kRoomLevelOut, kResFeedbackIn }, { kRoomActivityOut, kResPitchIn }, { kRoomBrightnessOut, kResShapeIn } },                       // the default patch minus STRIKE
         { { kLocalAudioOut, kResAudioIn }, { kRoomLevelOut, kResPitchIn }, { kRoomLevelOut, kResShapeIn }, { kRoomLevelOut, kResDampIn },
-          { kRoomLevelOut, kResExciteIn }, { kRoomLevelOut, kResDriftIn }, { kRoomLevelOut, kResFeedbackIn } },                              // one source everywhere
+          { kRoomLevelOut, kResDriftIn }, { kRoomLevelOut, kResFeedbackIn } },                                                               // one source everywhere but STRIKE
         { { kRadioAudioOut, kResAudioIn } } };
     std::mt19937 rng (21);
     std::uniform_real_distribution<float> u (0.0f, 1.0f);
@@ -649,19 +652,119 @@ void zeroCoupleAndAbsentSources()   // AT-03, AT-06, AT-07
     for (float depthValue : { -1.0f, -0.4f, 0.0f, 0.4f, 1.0f })
     {
         Graph g = audio;
-        g.connect (kRoomLevelOut, kResFeedbackIn, depthValue); g.connect (kRoomLevelOut, kResDampIn, depthValue);
+        g.connect (kRoomLevelOut, kResFeedbackIn, depthValue); g.connect (kRoomLevelOut, kResDampIn, depthValue); g.connect (kRoomActivityOut, kResExciteIn, depthValue);
         g.connect (kRoomActivityOut, kResPitchIn, depthValue); g.connect (kRoomBrightnessOut, kResShapeIn, depthValue); g.connect (kRoomLevelOut, kResDriftIn, depthValue);
-        CHECK (same (quiet, render (plan (g), silentRoom).out));                    // five destinations: neutral at every depth
-        // STRIKE: neutral at zero and negative depth...
-        if (depthValue <= 0.0f) CHECK (same (quiet, render (plan (with (audio, kRoomActivityOut, kResExciteIn, depthValue)), silentRoom).out));
+        CHECK (same (quiet, render (plan (g), silentRoom).out));                    // all six destinations, STRIKE included
     }
-    // ...but NOT at positive depth. KNOWN DEVIATION from the contract, kept on purpose: in the auditioned build a cable
-    // in STRIKE makes the steady excitation back off even while its source is silent, and "+100 % reproduces the
-    // original" wins until the owner decides otherwise (docs/p0/ATTENUVERTER-ACCEPTANCE.md, "Open conflict").
+}
+
+/** STRIKE correction: docs/p0/STRIKE-NEUTRAL.md. The frozen P0 engine is the reference for what changed and what did not. */
+void strikeNeutral()
+{
+    namespace base = wildband_baseline;
+    const double fs = 48000.0;
+    const Graph audio = wire<Graph> (kAudio);
+
+    currentTest = "ST-01 a silent source in STRIKE has no influence";
+    auto silentRoom = loud();
+    silentRoom.room = {};
+    const auto none = render (plan (audio), silentRoom).out;
+    for (int from : { kRoomLevelOut, kRoomActivityOut, kRoomBrightnessOut })
+        for (float d : { -1.0f, -0.5f, 0.0f, 0.3f, 1.0f })
+            CHECK (same (none, render (plan (with (audio, from, kResExciteIn, d)), silentRoom).out));
     {
-        const auto struck = render (plan (with (audio, kRoomActivityOut, kResExciteIn, 1.0f)), silentRoom).out;
-        CHECK (! same (quiet, struck));
-        CHECK (rms (struck) < rms (quiet));                                         // quieter, as in the auditioned build
+        // ...where P0 dimmed the sound: the defect this corrects, shown on the frozen engine
+        const size_t n = (size_t) fs * 2;
+        auto radio = testSource (fs, n);
+        base::Controls b;
+        for (int i = 0; i < base::kNumParams; ++i) b.p[i] = silentRoom.p[i];
+        b.p[kMix] = 1.0f;                                                 // resonators only, so the dimming is not masked by the dry signal
+        base::Graph cabled, bare;
+        bare.connect (kRadioAudioOut, kResAudioIn);
+        cabled.connect (kRadioAudioOut, kResAudioIn);
+        cabled.connect (kRoomActivityOut, kResExciteIn);
+        Buf l1 (n), r1 (n), l2 (n), r2 (n);
+        base::Engine e1, e2;
+        e1.prepare (fs); e2.prepare (fs);
+        b.plan = base::RoutingPlan::fromGraph (bare);
+        e1.process (radio.data(), radio.data(), radio.data(), l1.data(), r1.data(), (int) n, b);
+        b.plan = base::RoutingPlan::fromGraph (cabled);
+        e2.process (radio.data(), radio.data(), radio.data(), l2.data(), r2.data(), (int) n, b);
+        CHECK (rms (l2) < 0.5f * rms (l1));
+    }
+
+    currentTest = "ST-02 an active source in STRIKE behaves as in P0";
+    {
+        // a source that is active from the start: sample-identical to the frozen engine at +100 %
+        const size_t n = (size_t) fs * 2;
+        const auto radio = testSource (fs, n), local = noise (n, 0.2f, 5);
+        Controls c = loud();
+        base::Controls b;
+        for (int i = 0; i < base::kNumParams; ++i) b.p[i] = c.p[i];
+        b.room = { 1.0f, 1.0f, 1.0f };
+        c.plan = plan (with (audio, kRoomActivityOut, kResExciteIn, 1.0f));
+        base::Graph g;
+        g.connect (kRadioAudioOut, kResAudioIn);
+        g.connect (kRoomActivityOut, kResExciteIn);
+        b.plan = base::RoutingPlan::fromGraph (g);
+        Engine now;
+        base::Engine then;
+        now.prepare (fs); then.prepare (fs);
+        Buf l1 (n), r1 (n), l2 (n), r2 (n);
+        now.process (radio.data(), radio.data(), local.data(), l1.data(), r1.data(), (int) n, c);
+        then.process (radio.data(), radio.data(), local.data(), l2.data(), r2.data(), (int) n, b);
+        CHECK (same (l1, l2) && same (r1, r2));
+    }
+
+    currentTest = "ST-03 the influence ends when the source stops, and returns when it resumes";
+    {
+        // room hits for 2 s, silence for 16 s, hits again for 2 s; compared with no cable over the same input
+        Engine cabled, bare;
+        cabled.prepare (fs); bare.prepare (fs);
+        auto c = loud();
+        c.p[kMix] = 1.0f;
+        const auto radio = noise ((size_t) fs * 20, 0.2f);
+        Buf l (4800), r (4800), l0 (4800), r0 (4800);
+        std::array<float, 3> ratio {};                                    // cabled / bare RMS: during hits, late in the silence, after resuming
+        float held = 0;                                                   // ...and 3 s into the silence
+        for (int block = 0; block < 200; ++block)
+        {
+            const double t = block * 0.1;
+            c.room = (t < 2.0 || t >= 18.0) ? EnvFrame { 0.0f, 1.0f, 0.0f } : EnvFrame {};
+            c.plan = plan (with (audio, kRoomActivityOut, kResExciteIn, 1.0f));
+            cabled.process (radio.data() + block * 4800, radio.data() + block * 4800, radio.data(), l.data(), r.data(), 4800, c);
+            c.plan = plan (audio);
+            bare.process (radio.data() + block * 4800, radio.data() + block * 4800, radio.data(), l0.data(), r0.data(), 4800, c);
+            if (block == 15) ratio[0] = rms (l) / rms (l0);
+            if (block == 50) held = rms (l) / rms (l0);
+            if (block == 175) ratio[1] = rms (l) / rms (l0);
+            if (block == 195) ratio[2] = rms (l) / rms (l0);
+        }
+        CHECK (ratio[0] > 2.0f);                                          // hits strike: much louder than the bare patch
+        CHECK (held < 0.5f);                                              // 3 s after the last hit the back-off is still fully held (dimmer than bare)
+        CHECK (std::abs (ratio[1] - 1.0f) < 0.01f);                       // 15.5 s into the silence: within 1 % of no cable
+        CHECK (ratio[2] > 2.0f);                                          // and back
+    }
+
+    currentTest = "ST-04 the default patch differs from P0 only modestly";
+    {
+        const size_t n = (size_t) fs * 8;
+        const auto radio = testSource (fs, n), local = noise (n, 0.2f, 5);
+        Controls c = defaults();
+        base::Controls b;
+        for (int i = 0; i < base::kNumParams; ++i) b.p[i] = c.p[i];
+        Engine now;
+        base::Engine then;
+        now.prepare (fs); then.prepare (fs);
+        Buf l1 (n), r1 (n), l2 (n), r2 (n);
+        now.process (radio.data(), radio.data(), local.data(), l1.data(), r1.data(), (int) n, c);
+        then.process (radio.data(), radio.data(), local.data(), l2.data(), r2.data(), (int) n, b);
+        Buf d (n);
+        for (size_t i = 0; i < n; ++i) d[i] = l1[i] - l2[i];
+        strikeDefaultDifferenceDb = 20.0f * std::log10 (rms (d) / rms (l2) + 1.0e-9f);
+        strikeDefaultLevelDb = 20.0f * std::log10 (rms (l1) / rms (l2));
+        CHECK (! same (l1, l2));                                          // the intended deviation exists...
+        CHECK (std::abs (strikeDefaultLevelDb) < 3.0f);                   // ...and the overall level moves by less than 3 dB on this source
     }
 }
 
@@ -837,6 +940,7 @@ void all()
     persistence();
     graphRules();
     zeroCoupleAndAbsentSources();
+    strikeNeutral();
     signAndDirection();
     fanOut();
     clickFree();
@@ -1108,6 +1212,8 @@ void metrics()
     }
 
     std::printf ("\nTuner static at the default STATIC setting: %.1f dBFS RMS at the engine's radio input (48 kHz)\n", (double) tuner::staticDb);
+    std::printf ("\nSTRIKE correction, default patch vs the frozen P0 engine (local test source, 8 s): difference %.1f dB relative to P0, level change %+.2f dB\n",
+                 (double) depth::strikeDefaultDifferenceDb, (double) depth::strikeDefaultLevelDb);
     // synthetic cost of Engine::process alone, single thread, no audio device: NOT a CoreAudio measurement
     std::printf ("\nEngine::process cost, synthetic (48 kHz, block 64, 20 s of audio per row)\n%-28s %14s\n", "input", "ns per sample");
     for (int kind = 0; kind < 2; ++kind)
