@@ -50,8 +50,7 @@ public:
     void prepareToPlay (double sampleRate, int samplesPerBlock) override
     {
         instrument.prepareForHost (sampleRate, samplesPerBlock);
-        renderedSamples = 0;
-        lastCallbackMs = -1.0;
+        renderedSamples = 0;            // (lastCallbackMs is kept: a host re-preparing a live plugin must not look like silence)
         rate = sampleRate;
         lifecycle.push ({ Event::Prepared, isNonRealtime() });
     }
@@ -128,10 +127,10 @@ private:
         // ---- receiver lifecycle (docs/p1/PLUGIN-RECEIVER-LIFECYCLE.md)
         const bool wasActive = gate.active();            // before release/prepare events can change it
         Event e;
-        while (lifecycle.pop (e)) { if (e.type == Event::Prepared) gate.prepared (e.nonRealtime); else gate.released(); }
         const double nowS = juce::Time::getMillisecondCounterHiRes() / 1000.0, lastS = lastCallbackMs.load() / 1000.0;
+        while (lifecycle.pop (e)) { if (e.type == Event::Prepared) gate.prepared (e.nonRealtime); else gate.released (nowS); }
         gate.update (nowS, (double) renderedSamples.load() / rate, lastS, nonRealtimeNow.load());
-        if (wasActive && ! gate.active()) { instrument.radio.tune ({}); tuned = -1; }   // suspend / release: cancel the stream
+        if (wasActive && ! gate.active()) { instrument.radio.resume ({}); if (tuned >= 0) suspendedStation = tuned; tuned = -1; }   // suspend / release: cancel the stream
 
         // A knob moved by MIDI learn (the instrument's own controller map) is mirrored into its host parameter, so the
         // host sees it and saves it - unless the host has moved that parameter itself since processBlock last looked.
@@ -149,7 +148,16 @@ private:
         const int wantedNow = dial (instrument.params[kTune].load(), kNumStations).station;
         const auto now = juce::Time::getMillisecondCounter();
         if (wantedNow != wanted) { wanted = wantedNow; wantedSince = now; }
-        if (wanted != tuned && now - wantedSince > 250) { tuned = wanted; instrument.radio.tune (stations[(size_t) tuned].url); }
+        if (wanted != tuned && now - wantedSince > 250)
+        {
+            // Coming back to the station that was playing before a suspension, a release or construction is not a retune:
+            // it buffers silently. Moving TUNE to another station while live is one, with tuner static.
+            const bool resuming = wanted == suspendedStation || suspendedStation == kNever;
+            tuned = wanted;
+            suspendedStation = -1;
+            if (resuming) instrument.radio.resume (stations[(size_t) tuned].url);
+            else instrument.radio.tune (stations[(size_t) tuned].url);
+        }
     }
 
     // audio thread -> message thread, for the receiver gate
@@ -173,7 +181,8 @@ private:
     std::array<juce::AudioParameterFloat*, kNumParams> hostParams {};
     std::array<std::atomic<float>, kNumParams> lastHost {};
     std::array<Station, kNumStations> stations;
-    int wanted = -1, tuned = -1;
+    static constexpr int kNever = -2;     // never connected yet: the first connection is a start, not a retune
+    int wanted = -1, tuned = -1, suspendedStation = kNever;
     juce::uint32 wantedSince = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (WildbandProcessor)

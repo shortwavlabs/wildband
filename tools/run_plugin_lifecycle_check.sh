@@ -15,7 +15,7 @@ ffmpeg -v error -y -f lavfi -i "sine=frequency=440:duration=20" -filter:a "volum
 python3 -I tools/stream_test_server.py "$TMP/a.mp3" 8765 --log "$LOG" &
 SERVER=$!
 sleep 1
-export WILDBAND_TEST_STATIONS="http://127.0.0.1:8765/live,http://127.0.0.1:8765/a,http://127.0.0.1:8765/b,http://127.0.0.1:8765/c,http://127.0.0.1:8765/live,http://127.0.0.1:8765/a"
+export WILDBAND_TEST_STATIONS="http://127.0.0.1:8765/live,http://127.0.0.1:8765/a,http://127.0.0.1:8765/silent,http://127.0.0.1:8765/c,http://127.0.0.1:8765/live,http://127.0.0.1:8765/a"
 : > "$LOG"
 STATUS=0
 "$BUILD/wildband_plugin_check_artefacts/Release/wildband_plugin_check" "vst3=$PWD/$BUILD/WILDBAND_Plugin_artefacts/Release/VST3/WILDBAND.vst3" "lifecycle=$LOG" 2>&1 | grep -v "^JUCE" || STATUS=1
@@ -26,7 +26,8 @@ auval -v aumu Wldb SwLb > "$TMP/auval.txt" 2>&1 &
 AUVAL=$!
 REMOTE=0
 while kill -0 "$AUVAL" 2>/dev/null; do
-    N=$(lsof -nP -a -p "$AUVAL" -iTCP 2>/dev/null | grep -v "127.0.0.1" | grep -c "TCP" || true)
+    # lsof does not see connections made through macOS's user-space networking stack; netstat -anv does, with the pid
+    N=$(netstat -anv -p tcp 2>/dev/null | grep ":$AUVAL " | grep -v "127.0.0.1" | grep -c "ESTABLISHED\|SYN_SENT" || true)
     [ "$N" -gt "$REMOTE" ] && REMOTE=$N
     sleep 0.2
 done
@@ -34,5 +35,5 @@ wait "$AUVAL" && AUVAL_OK=1 || AUVAL_OK=0
 OPENS=$(grep -c "^open" "$LOG" || true)
 grep -q "AU VALIDATION SUCCEEDED" "$TMP/auval.txt" && echo "  pass  RL-19 auval: AU VALIDATION SUCCEEDED" || { echo "  FAIL  RL-19 auval did not succeed"; STATUS=1; }
 [ "$OPENS" -eq 0 ] && echo "  pass  RL-18 auval opened $OPENS connections to the counting server" || { echo "  FAIL  RL-18 auval opened $OPENS connections"; STATUS=1; }
-[ "$REMOTE" -eq 0 ] && echo "  pass  RL-18 no remote TCP connection seen from the auval process (sampled every 0.2 s)" || { echo "  FAIL  RL-18 $REMOTE remote TCP connection(s) seen from auval"; STATUS=1; }
+[ "$REMOTE" -eq 0 ] && echo "  pass  RL-18 no remote TCP connection seen from the auval process (netstat, sampled every 0.2 s)" || { echo "  FAIL  RL-18 $REMOTE remote TCP connection(s) seen from auval"; STATUS=1; }
 exit $STATUS

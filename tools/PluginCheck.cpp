@@ -209,7 +209,9 @@ void lifecycle (juce::AudioPluginFormatManager& fm, const juce::String& format, 
     p->releaseResources();
     pump (1.5);
     c = connections (t2);
-    check (c.closes == c.opens && c.lastClose - released <= 1.0, "RL-17 releaseResources while active: closed " + juce::String (c.lastClose - released, 2) + " s later");
+    // limit raised from 1.0 to 1.5 s when the 0.5 s release grace period was added (RL-21): grace + one timer tick +
+    // the time the test server takes to notice a closed socket (it only finds out on its next paced write)
+    check (c.closes == c.opens && c.lastClose - released <= 1.5, "RL-17 releaseResources while active: closed " + juce::String (c.lastClose - released, 2) + " s later (0.5 s grace period; limit 1.5 s)");
     p->prepareToPlay (48000.0, 512);
     t2 = epoch();
     render (*p, 3.0, true);
@@ -218,8 +220,56 @@ void lifecycle (juce::AudioPluginFormatManager& fm, const juce::String& format, 
     pump (1.5);
     c = connections (t2);
     check (c.opens == 1 && c.closes == 1 && c.lastClose - destroyed <= 1.0, "RL-17 destroyed while active: closed " + juce::String (c.lastClose - destroyed, 2) + " s later; open now: " + juce::String (c.opens - c.closes));
+    // RL-20 / RL-21: a host re-preparing a live plugin
+    {
+        auto q = load (fm, format, id, 48000.0, 512);
+        q->prepareToPlay (48000.0, 512);
+        render (*q, 2.5, true);
+        double t3 = epoch();
+        q->prepareToPlay (48000.0, 512);                        // same rate, e.g. a buffer-size change
+        render (*q, 2.5, true);
+        auto c3 = connections (t3);
+        check (c3.opens == 0 && c3.closes == 0, "RL-20 prepareToPlay again while live (still rendering): " + juce::String (c3.opens) + " opened, " + juce::String (c3.closes) + " closed");
+        t3 = epoch();
+        q->releaseResources();
+        q->prepareToPlay (48000.0, 512);
+        render (*q, 3.0, true);
+        c3 = connections (t3);
+        check (c3.closes == 0 && c3.opens == 0, "RL-21 release + prepare back to back while live (a host re-initialising): stream kept (" + juce::String (c3.opens) + " opened, " + juce::String (c3.closes) + " closed)");
+        q.reset();
+        pump (1.0);
+    }
+
+    // RL-22: teardown while a connection is still being made (station 3 points at a server that never answers)
+    {
+        auto q = load (fm, format, id, 48000.0, 512);
+        for (auto* prm : q->getParameters()) if (prm->getName (16) == "TUNE") prm->setValue ((2.0f + 0.5f) / 6.0f);
+        q->prepareToPlay (48000.0, 512);
+        double t3 = epoch();
+        render (*q, 2.5, true);
+        const bool connecting = connections (t3).opens == 1;
+        double t0 = juce::Time::getMillisecondCounterHiRes();
+        q->releaseResources();
+        const double releaseMs = juce::Time::getMillisecondCounterHiRes() - t0;
+        q->prepareToPlay (48000.0, 512);
+        render (*q, 2.5, true);
+        t0 = juce::Time::getMillisecondCounterHiRes();
+        q.reset();
+        const double destroyMs = juce::Time::getMillisecondCounterHiRes() - t0;
+        check (connecting && releaseMs < 100.0 && destroyMs < 1000.0, "RL-22 mid-connect to a silent server: release returned in " + juce::String (releaseMs, 1) + " ms, destruction in " + juce::String (destroyMs, 1) + " ms");
+    }
+
     const auto all = connections (0);
-    check (all.opens == all.closes, "no connection left open overall (" + juce::String (all.opens) + " opened, " + juce::String (all.closes) + " closed)");
+    // (connections to the silent server are never logged as closed: its handler is asleep, not reading)
+    (void) all;
+    int answered = 0, answeredClosed = 0;
+    for (const auto& line : juce::StringArray::fromLines (serverLog.loadFileAsString()))
+    {
+        if (line.contains ("/silent")) continue;
+        if (line.startsWith ("open ")) ++answered;
+        if (line.startsWith ("close ")) ++answeredClosed;
+    }
+    check (answered == answeredClosed, "no stream connection left open overall (" + juce::String (answered) + " opened, " + juce::String (answeredClosed) + " closed)");
 }
 } // namespace
 

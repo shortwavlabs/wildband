@@ -5,8 +5,8 @@ VST3
   pass  described as an instrument
   pass  the 10 parameters in the frozen hosted order: TUNE, PITCH, SHAPE, TONE, COUPLE, DRIFT, FEEDBACK, MIX, LEVEL, STATIC
   pass  2081 further parameters added by JUCE's VST3 wrapper (bypass and MIDI CC emulation)
-  pass  6 s in real time at 48 kHz: sound in the first half (static and/or broadcast, peak 0.384) and in the second (peak 0.411), under the ceiling
-  pass  rendered 3 s faster than real time at 44.1 kHz with automation and MIDI: finite, peak 0.017 (ceiling 0.89)
+  pass  6 s in real time at 48 kHz: sound in the first half (static and/or broadcast, peak 0.495) and in the second (peak 0.556), under the ceiling
+  pass  rendered 3 s faster than real time at 44.1 kHz with automation and MIDI: finite, peak 0.026 (ceiling 0.89)
   pass  rendered 3 s faster than real time at 48.0 kHz with automation and MIDI: finite, peak 0.000 (ceiling 0.89)
   pass  rendered 3 s faster than real time at 96.0 kHz with automation and MIDI: finite, peak 0.000 (ceiling 0.89)
   pass  state restores every parameter in a second instance
@@ -18,8 +18,8 @@ AudioUnit
   pass  described as an instrument
   pass  the 10 parameters in the frozen hosted order: MIX, TONE, TUNE, DRIFT, LEVEL, PITCH, SHAPE, COUPLE, STATIC, FEEDBACK
   pass  0 further parameters
-  pass  6 s in real time at 48 kHz: sound in the first half (static and/or broadcast, peak 0.453) and in the second (peak 0.503), under the ceiling
-  pass  rendered 3 s faster than real time at 44.1 kHz with automation and MIDI: finite, peak 0.068 (ceiling 0.89)
+  pass  6 s in real time at 48 kHz: sound in the first half (static and/or broadcast, peak 0.585) and in the second (peak 0.564), under the ceiling
+  pass  rendered 3 s faster than real time at 44.1 kHz with automation and MIDI: finite, peak 0.130 (ceiling 0.89)
   pass  rendered 3 s faster than real time at 48.0 kHz with automation and MIDI: finite, peak 0.000 (ceiling 0.89)
   pass  rendered 3 s faster than real time at 96.0 kHz with automation and MIDI: finite, peak 0.000 (ceiling 0.89)
   pass  state restores every parameter in a second instance

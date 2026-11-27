@@ -1759,15 +1759,52 @@ void all()
         CHECK (drive (g, now, rendered, last, 1.4, 1.0) == G::State::Suspended);
         CHECK (drive (g, now, rendered, last, 1.8, 1.0) == G::State::Active);
     }
-    currentTest = "RL-07 release goes dormant at once";
+    currentTest = "RL-08 prepared for offline: stays dormant until a real-time prepare";
+    {
+        G g;
+        g.prepared (true);
+        double now = 100, rendered = 0, last = -1;
+        CHECK (drive (g, now, rendered, last, 5, 1.0) == G::State::Dormant);       // even if it is then fed in real time
+        g.prepared (false);
+        CHECK (drive (g, now, rendered, last, 1.7, 1.0) == G::State::Active);
+    }
+    currentTest = "RL-09 a re-prepare while active stays active";
     {
         G g;
         g.prepared (false);
         double now = 100, rendered = 0, last = -1;
         drive (g, now, rendered, last, 2, 1.0);
-        g.released();
-        CHECK (g.current() == G::State::Dormant);
+        g.prepared (false);
+        CHECK (g.current() == G::State::Active);
+        CHECK (drive (g, now, rendered, last, 1, 1.0) == G::State::Active);
+    }
+    currentTest = "RL-07 release goes dormant within the 0.5 s grace period";
+    {
+        G g;
+        g.prepared (false);
+        double now = 100, rendered = 0, last = -1;
+        drive (g, now, rendered, last, 2, 1.0);
+        g.released (now);
+        CHECK (drive (g, now, rendered, last, 0.4, 0.0) == G::State::Active);
+        CHECK (drive (g, now, rendered, last, 0.2, 0.0) == G::State::Dormant);
         CHECK (drive (g, now, rendered, last, 5, 1.0) == G::State::Dormant);
+        G h;                                                                     // release when not active: at once
+        h.prepared (false);
+        h.released (now);
+        CHECK (h.current() == G::State::Dormant);
+    }
+    currentTest = "RL-07b release + prepare back to back (a host re-initialising) stays active";
+    {
+        G g;
+        g.prepared (false);
+        double now = 100, rendered = 0, last = -1;
+        drive (g, now, rendered, last, 2, 1.0);
+        g.released (now);
+        g.prepared (false);
+        CHECK (drive (g, now, rendered, last, 2, 1.0) == G::State::Active);
+        g.released (now);
+        g.prepared (true);                                                       // ...but not into offline rendering
+        CHECK (g.current() == G::State::Dormant);
     }
 }
 } // namespace gateTests

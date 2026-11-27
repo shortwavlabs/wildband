@@ -246,6 +246,19 @@ int main (int argc, char** argv)
         rig.radio.setOutputRate (48000.0);
     }
 
+    std::printf ("RL-23 resume is not a retune\n");
+    {
+        Rig rig;
+        rig.run (0.2);
+        const int request = rig.radio.request();
+        const double start = rig.now();
+        rig.radio.resume (base + "/wait/1.0");
+        const double live = rig.untilLive (10.0);
+        rig.run (0.5);
+        CHECK (live > 0 && rig.maxGap (start, rig.now()) == 0.0f && rig.maxStatic (start, rig.now()) < 0.001f && rig.radio.request() == request,
+               "resume (as the plugin does after a suspension): LIVE after %.2f s, no static, same request", live);
+    }
+
     std::printf ("CT-15 spontaneous dropout\n");
     {
         Rig rig;

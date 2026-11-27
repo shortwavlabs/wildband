@@ -21,14 +21,36 @@ public:
     static constexpr double kMaxGapSeconds = 0.5;          // a longer gap between callbacks restarts that window
     static constexpr double kSuspendAfterSeconds = 5.0;    // no callbacks for this long while active: suspend
     static constexpr double kMinRatio = 0.5, kMaxRatio = 2.0;   // rendered audio time / wall time
+    // A host that re-initialises a live plugin (an AU host changing buffer size or rate does release + prepare back to
+    // back) should not drop and redial the station. A release while active therefore takes effect after this grace
+    // period unless a real-time prepare arrives first.
+    static constexpr double kReleaseGraceSeconds = 0.5;
 
-    void prepared (bool nonRealtime) noexcept { state = nonRealtime ? State::Dormant : (state == State::Active ? State::Active : State::Armed); resetWindow(); }
-    void released() noexcept { state = State::Dormant; resetWindow(); }
+    void prepared (bool nonRealtime) noexcept
+    {
+        if (releaseAt >= 0.0 && ! nonRealtime) { releaseAt = -1.0; return; }        // re-initialised while live: carry on
+        releaseAt = -1.0;
+        state = nonRealtime ? State::Dormant : (state == State::Active ? State::Active : State::Armed);
+        resetWindow();
+    }
+    void released (double nowSeconds) noexcept
+    {
+        if (state == State::Active) { releaseAt = nowSeconds + kReleaseGraceSeconds; return; }
+        state = State::Dormant;
+        resetWindow();
+    }
 
     /** Message thread, regularly. `nowSeconds`: wall clock. `renderedSeconds`: total audio rendered so far (monotonic),
         `lastCallbackSeconds`: wall-clock time of the latest audio callback (negative if none yet). */
     State update (double nowSeconds, double renderedSeconds, double lastCallbackSeconds, bool nonRealtime) noexcept
     {
+        if (releaseAt >= 0.0)
+        {
+            if (nowSeconds < releaseAt) return state;                     // still ACTIVE during the grace period
+            releaseAt = -1.0;
+            state = State::Dormant;
+            resetWindow();
+        }
         if (state == State::Dormant) return state;
         if (nonRealtime) { if (state == State::Active) state = State::Suspended; resetWindow(); return state; }
 
@@ -57,7 +79,7 @@ public:
 private:
     void resetWindow() noexcept { windowStart = -1.0; windowRendered = 0.0; }
     State state = State::Dormant;
-    double windowStart = -1.0, windowRendered = 0.0;
+    double windowStart = -1.0, windowRendered = 0.0, releaseAt = -1.0;
 };
 
 } // namespace wildband
