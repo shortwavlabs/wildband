@@ -52,6 +52,7 @@ WILDBAND uses live radio and local/remote environment signals to drive performan
 - **Motors/solenoids/physical actuators:** only with explicitly supported external hardware and bounded outputs, likely MIDI or dedicated protocol; not a laptop-only requirement.
 - **Second live radio:** separate from Field Kit utilities but especially useful for cross-modulation and auxiliary sends after core playback and routing are solid.
 - **Korupt integration:** see [WILDBAND Issue #2](https://github.com/shortwavlabs/wildband/issues/2) for independent CMOS/PLL port feasibility and audio/CV output proposals.
+- **Wyrd reuse research:** [Wyrd component audit](WYRD-REUSE-RESEARCH.md) evaluates its TOUCH matrix, feedback-aware delay, stereo reverb, strength/envelope analysis and agitation generator, prioritizing meaningful world-to-sound interactions over adding generic effects.
 
 ## Drift port research note (not part of P0)
 
