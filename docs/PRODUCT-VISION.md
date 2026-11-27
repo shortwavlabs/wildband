@@ -2,9 +2,11 @@
 
 **Status:** exploration, not product approval. **Working phrase:** Play the world.
 
-WILDBAND is a macOS-first live electronic instrument. Its sound source is a live radio broadcast; its behavior is influenced by the performer's gestures and optionally by their physical and remote environment. It is for *performing in the moment*, not capturing, sampling, exporting, archiving or re-creating a fixed musical result.
+WILDBAND is a macOS-first live electronic instrument. Its sound source is a live radio broadcast; its behavior is influenced by the performer's gestures and optionally by their physical and remote environment. It is for *performing in the moment*, not archiving, exporting or re-creating a fixed musical result. A tiny volatile radio loop is an explicit live-playing exception, never saved as audio.
 
 The owner's detailed creative direction is recorded in [Instrument Design & Experience Manifesto](INSTRUMENT-DESIGN-MANIFESTO.md): a cohesive semi-modular instrument, distinctive sound, meaningful WORLD coupling, playful discovery and the favorite guitar test. Candidate functions are curated, not a general-purpose modular rack.
+
+The agreed [Product Roadmap](ROADMAP.md) defines the staged development and contest delivery priorities.
 
 ## Creative thesis
 
@@ -36,8 +38,8 @@ Distinctly Shortwav Labs; official orange **#F59E0B**. A Blender-authored physic
 ## Firm boundaries
 
 - The primary product is an **instrument**, not an audio recording or productivity application.
-- No built-in record, capture, rip, render or sample-library workflow in P0.
-- Standalone macOS first. AU/VST3 and Windows are optional decisions after P0.
+- No built-in record, capture, rip, render or sample-library workflow in historical P0. Post-P0, the owner approved [LOOP](TAPESTRY-LOOPER-RESEARCH.md): short explicitly captured, RAM-only fragments for live manipulation; no saved audio, full-performance recording, sample library or export.
+- Standalone macOS first for P0. The agreed roadmap targets macOS standalone, AUv2 and VST3 for release; macOS AUv3 is a feasibility/qualification target, Windows and iPadOS future.
 - External sensors must be opt-in; the instrument remains useful if all are unavailable.
 - Wi-Fi/Bluetooth metadata is *not* general RF field sensing; raw spectrum requires external hardware.
 - Playability matters more than whether the music can literally never repeat.
