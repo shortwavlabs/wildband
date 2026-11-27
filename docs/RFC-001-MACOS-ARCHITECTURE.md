@@ -37,6 +37,8 @@ Start with a *small* network: streaming audio excitation -> resonant/nonlinear v
 
 Do not overcommit to spectral, granular or complex physically modeled DSP until listening tests support it. Conduct an A/B against a generic filter-and-delay chain.
 
+**AFTERIMAGE reuse (post-P0 research):** investigate a bounded, continuously refreshed live granular delay, retaining the useful CLOUD scheduler and TRACE-to-CLOUD DISSOLVE concept without the manual capture/spectrogram workflow. Optional spectral filtering and FOCUS/GLITCH are gated by musical benefit and realtime cost. See [`AFTERIMAGE-SPECTRAL-GRANULAR-REUSE.md`](AFTERIMAGE-SPECTRAL-GRANULAR-REUSE.md) for source evidence, open performance/rights issues and world-driven experiments.
+
 Post-P0, evaluate AFTERIMAGE's CLOUD scheduler, TRACE-to-CLOUD DISSOLVE and optional spectral guidance as a continuously fed, patchable granular delay, without its user capture/IMPRINT workflow. See [`AFTERIMAGE-DSP-REUSE.md`](AFTERIMAGE-DSP-REUSE.md) for the verified prior research, realtime gate failures, licensing review, and live-stream adaptation proposal. This does not modify P0 scope.
 
 ## Follow-up patch utilities (research only)
