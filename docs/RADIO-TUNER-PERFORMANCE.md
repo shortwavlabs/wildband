@@ -20,6 +20,8 @@ The [P0 prototype PR #3](https://github.com/shortwavlabs/wildband/pull/3) report
 - **HOP:** jump to another selected station on demand, with optional sequential or random selection. Evaluate a clock or patchable gate/trigger mode later (radio transients, ROOM hits, Drift or phone gestures). Edge-trigger, debounce, apply hysteresis/cooldown and coalesce rapid changes; never initiate a network operation at audio rate. Manual selection takes precedence over automatic hopping.
 - **STATIC:** adjustable intensity including completely off; conservative default and smoothed changes. An optional character control may be explored only if it improves playing.
 
+Post-P0 owner amendment: [worldwide catalog and sets](WORLD-RADIO-CATALOG.md) retains up to six user-selected presets per patch, with independent receivers A/B sharing the slot list. Maximum two concurrent stream sessions including previews and retunes. Apply the tuner/static state machine independently to each receiver; no extra prebuffer connections. This does not invalidate the historical single-receiver experiment.
+
 The first implementation should be manual station selection and actual-buffer-driven static. Automatic hopping and extra controls are follow-up experiments, not prerequisites.
 
 ## Transition state model
@@ -59,6 +61,6 @@ Bound noise peak/RMS, avoid DC, ramp transitions, and verify worst-case feedback
 
 ## Persistence and boundaries
 
-Save station URLs, preset selection/configuration, MIDI mappings, tuner settings and patch relationships only. No stored broadcast excerpts, recordings, static captures or performance history. Keep internet radio playback independent of microphone access, phone pairing or other optional sensors. Investigate broadcaster terms and rights before publishing any contest performance containing broadcast audio.
+Save station references/URLs, ordered six-slot set and independent A/B selection/configuration, MIDI mappings, tuner settings and patch relationships only. No persisted broadcast excerpts, recordings, static captures or performance history. The approved [LOOP](TAPESTRY-LOOPER-RESEARCH.md) is a short volatile capture exception; no audio serialization. Keep internet radio playback independent of microphone access, phone pairing or other optional sensors. Investigate broadcaster terms and rights before publishing any contest performance containing broadcast audio.
 
 **Decision rule:** keep the inexpensive one-receiver, actual-state-driven transition if it makes latency musically useful. Add complexity only when owner listening demonstrates a clear benefit.
