@@ -15,3 +15,36 @@ This repository is in **research / feasibility**. No implementation, licensing d
 - **Mac first.** macOS standalone is the initial research target. AU/VST3 and Windows remain contingent decisions.
 
 See the upcoming research documents for hypotheses, constraints, and explicit evidence gates. No code or DSP architecture is considered validated yet.
+
+## P0 prototype (research build)
+
+A playable proof of concept lives on the `p0/prototype` branch. It answers a feasibility question; it is not a
+product, and none of its design is approved. Start with [`docs/p0/REPORT.md`](docs/p0/REPORT.md) and
+[`docs/p0/PLAYTEST-GUIDE.md`](docs/p0/PLAYTEST-GUIDE.md).
+
+Requirements: macOS 12 or later on Apple Silicon, Xcode command-line tools, CMake 3.22 or later. JUCE 9.0.5 is
+fetched by CMake at a pinned commit (add `-DFETCHCONTENT_SOURCE_DIR_JUCE=/path/to/JUCE` to use a local checkout of
+that commit). No other dependency: streams are decoded by macOS.
+
+```bash
+cmake -S . -B build
+```
+
+```bash
+cmake --build build -j
+```
+
+```bash
+ctest --test-dir build
+```
+
+```bash
+open build/WILDBAND_artefacts/Release/WILDBAND.app
+```
+
+Other tools: `build/wildband_radio_probe_artefacts/Release/wildband_radio_probe <url>...` tests stream addresses
+without an audio device; `WILDBAND.app/Contents/MacOS/WILDBAND --measure=FILE` runs the muted CoreAudio timing
+sweep (it changes the output device's sample rate and puts it back); `--mute` runs silently without touching saved
+settings. The Blender knob is rebuilt with the two commands at the top of `assets/blender/knob.py`.
+
+Licensing is undecided. JUCE is AGPLv3 or commercial; see `docs/p0/ARCHITECTURE.md`.
