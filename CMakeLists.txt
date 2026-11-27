@@ -24,6 +24,27 @@ set(WILDBAND_DEFS
     # stream decoding is done by macOS (AudioToolbox); JUCE's own codecs are not compiled in
     JUCE_USE_FLAC=0 JUCE_USE_OGGVORBIS=0 JUCE_USE_OPUS=0 JUCE_USE_MP3AUDIOFORMAT=0 JUCE_USE_WEBP=0)
 
+# ---- optional: the Rings resonator experiment (docs/p1/RINGS-EXPERIMENT.md). Rings is MIT-licensed upstream code by
+# Emilie Gillet (Mutable Instruments). It is NOT in this repository: give a checkout of pichenettes/eurorack at the
+# pinned commit (with its stmlib submodule) as -DEURORACK_DIR=..., or let CMake fetch it with -DWILDBAND_FETCH_RINGS=ON.
+set(WILDBAND_EURORACK_COMMIT f4cfa7697095a28d292bff758beb51deb49b5a86)   # stmlib submodule: e3bd7c9cc00e4364166f9905c0509b6ffd0535ec
+option(WILDBAND_FETCH_RINGS "Fetch upstream Rings (pichenettes/eurorack) at the pinned commit" OFF)
+if(WILDBAND_FETCH_RINGS AND NOT EURORACK_DIR)
+    FetchContent_Declare(eurorack GIT_REPOSITORY https://github.com/pichenettes/eurorack.git GIT_TAG ${WILDBAND_EURORACK_COMMIT} GIT_SUBMODULES stmlib)
+    FetchContent_Populate(eurorack)
+    set(EURORACK_DIR ${eurorack_SOURCE_DIR})
+endif()
+if(EURORACK_DIR)
+    add_library(wildband_rings STATIC
+        ${EURORACK_DIR}/rings/dsp/part.cc ${EURORACK_DIR}/rings/dsp/resonator.cc ${EURORACK_DIR}/rings/dsp/string.cc
+        ${EURORACK_DIR}/rings/dsp/fm_voice.cc ${EURORACK_DIR}/rings/dsp/string_synth_part.cc ${EURORACK_DIR}/rings/resources.cc
+        ${EURORACK_DIR}/stmlib/dsp/units.cc ${EURORACK_DIR}/stmlib/utils/random.cc)
+    target_include_directories(wildband_rings SYSTEM PUBLIC ${EURORACK_DIR})
+    target_compile_definitions(wildband_rings PUBLIC TEST WILDBAND_HAS_RINGS=1)   # TEST: upstream's own switch for host builds
+    target_compile_options(wildband_rings PRIVATE -w -O2)                        # upstream is compiled unmodified, as it is
+    message(STATUS "WILDBAND: Rings experiment enabled from ${EURORACK_DIR}")
+endif()
+
 # ---- the instrument
 juce_add_gui_app(WILDBAND
     PRODUCT_NAME "WILDBAND"
@@ -93,6 +114,11 @@ endif()
 # ---- engine tests: no JUCE
 add_executable(wildband_tests tests/Tests.cpp)
 target_compile_options(wildband_tests PRIVATE -Wall -Wextra)
+if(TARGET wildband_rings)
+    target_link_libraries(wildband_tests PRIVATE wildband_rings)
+    target_link_libraries(wildband_voice_lab PRIVATE wildband_rings)
+    target_link_libraries(WILDBAND PRIVATE wildband_rings)
+endif()
 enable_testing()
 add_test(NAME wildband_tests COMMAND wildband_tests)
 

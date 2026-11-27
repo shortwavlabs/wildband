@@ -1468,6 +1468,207 @@ void all()
 }
 } // namespace voice
 
+#if WILDBAND_HAS_RINGS
+// =====================================================================================================================
+// Rings resonator experiment: docs/p1/RINGS-EXPERIMENT.md. Built only when upstream Rings is configured.
+namespace ringsTests
+{
+float costNs[3] = {};
+
+void all()
+{
+    const double fs = 48000.0;
+    auto rendered = [&] (Controls c, const Buf& x, int block = 64) { Engine e; e.prepare (fs); return run (e, x, c, block); };
+    auto ringsControls = [] (int model) { auto c = defaults(); c.voice = 3 + model; c.p[kMix] = 1.0f; c.p[kCouple] = 0.0f; return c; };
+
+    currentTest = "RG-02 silence and reset";
+    for (int model = 0; model < 3; ++model)
+    {
+        auto c = ringsControls (model);
+        Engine e;
+        e.prepare (fs);
+        Buf x = noise (48000 * 14, 0.4f);
+        std::fill (x.begin() + 48000, x.end(), 0.0f);                              // one second of noise, then silence
+        const auto y = run (e, x, c, 64);
+        CHECK (rms (Buf (y.begin(), y.begin() + 96000)) > 1.0e-3f);                // it sounds
+        CHECK (rms (y, 48000 * 2 * 13) < 3.2e-5f);                                 // below -90 dBFS 12 s after the input stops
+        Engine e2;
+        e2.prepare (fs);
+        run (e2, noise (48000, 0.4f), c, 64);
+        e2.panic();
+        CHECK (peak (run (e2, Buf (48000 * 2, 0.0f), c, 64)) == 0.0f);             // PANIC: exact silence from silence
+    }
+
+    currentTest = "RG-03 tuning (modal, 48 kHz)";
+    for (float midi : { 48.0f, 60.0f, 72.0f })
+    {
+        auto c = ringsControls (0);
+        c.p[kPitch] = (midi - 36.0f) / 48.0f; c.p[kShape] = 0.25f; c.p[kTone] = 0.7f; c.p[kFeedback] = 0.8f; c.p[kDrift] = 0.3f;
+        Buf x ((size_t) fs, 0.0f);
+        x[10] = 1.0f;
+        const auto y = rendered (c, x);
+        const double period = fs / (440.0 * std::exp2 ((midi - 69.0) / 12.0));
+        const int span = 8;
+        const size_t from = (size_t) (fs * 0.05), len = (size_t) (fs * 0.4);
+        auto corr = [&] (int lag) { double s = 0; for (size_t i = from; i < from + len; ++i) s += (double) y[2 * i] * y[2 * (i + (size_t) lag)]; return s; };
+        int best = 0;
+        double bestV = -1e30;
+        for (int lag = (int) (span * period * 0.96); lag <= (int) (span * period * 1.04) + 1; ++lag)
+            if (const double v = corr (lag); v > bestV) { bestV = v; best = lag; }
+        const double a = corr (best - 1), b = bestV, d = corr (best + 1);
+        const double cents = 1200.0 * std::log2 (span * period / (best + 0.5 * (a - d) / (a - 2.0 * b + d)));
+        CHECK (std::abs (cents) < 10.0);
+        if (std::abs (cents) >= 10.0) std::printf ("    midi %.0f: %.1f cents\n", (double) midi, cents);
+    }
+
+    currentTest = "RG-04 safety, determinism, no allocation";
+    {
+        std::mt19937 rng (31);
+        std::uniform_real_distribution<float> u (0.0f, 1.0f);
+        Buf nasty = noise (48000 * 2, 1.0f);
+        for (size_t i = 0; i < nasty.size(); ++i) { if (i % 9973 == 0) nasty[i] = std::numeric_limits<float>::quiet_NaN(); if (i % 5000 == 2) nasty[i] = 1.0e30f; }
+        for (int trial = 0; trial < 18; ++trial)
+        {
+            Controls c;
+            for (auto& p : c.p) p = trial == 0 ? 0.0f : trial == 1 ? 1.0f : trial < 9 ? (float) (rng() & 1) : u (rng);
+            c.p[kLevel] = 1.0f; c.voice = 3 + trial % 3; c.room = { u (rng), u (rng), u (rng) }; c.gap = u (rng);
+            Engine e;
+            e.prepare (trial % 2 ? 48000.0 : 44100.0);
+            const auto y = run (e, nasty, c, trial % 2 ? 0 : 64);
+            CHECK (allFinite (y) && peak (y) <= Engine::kCeiling && e.faults.load() == 0);
+        }
+        const auto x = testSource (fs, 48000);
+        auto c = ringsControls (2);
+        CHECK (depth::same (rendered (c, x), rendered (c, x)));                    // deterministic
+        Engine e;
+        e.prepare (fs);
+        Buf l (64), r (64);
+        const auto in = noise (64, 0.5f);
+        watched = pthread_self();
+        allocs = 0;
+        malloc_logger = countAllocs;
+        for (int b = 0; b < 3000; ++b) { c.voice = 3 + (b / 500) % 3; c.p[b % kNumParams] = (float) (b % 17) / 16.0f; e.process (in.data(), in.data(), in.data(), l.data(), r.data(), 64, c); if (b == 1500) e.panic(); }
+        malloc_logger = nullptr;
+        CHECK (allocs.load() == 0);
+    }
+
+    currentTest = "RG-05 latency is 24 samples at any block size";
+    {
+        const auto x = testSource (fs, 48000);
+        auto c = ringsControls (0);
+        const auto a = rendered (c, x, 1), b = rendered (c, x, 64), d = rendered (c, x, 1000);
+        CHECK (depth::same (a, b) && depth::same (a, d));
+        Buf impulse (4800, 0.0f);
+        impulse[0] = 1.0f;
+        const auto y = rendered (c, impulse);
+        size_t first = 0;
+        while (first < impulse.size() && y[2 * first] == 0.0f && y[2 * first + 1] == 0.0f) ++first;
+        CHECK (first >= (size_t) RingsVoice::kBlock && first <= (size_t) RingsVoice::kBlock + 2);
+    }
+
+    currentTest = "RG-06 controls and WORLD are heard";
+    {
+        const auto x = testSource (fs, 48000 * 2);
+        auto differ = [] (const Buf& a, const Buf& b) { Buf d (a.size()); for (size_t i = 0; i < a.size(); ++i) d[i] = a[i] - b[i]; return rms (d) / (rms (a) + 1.0e-9f); };
+        for (int model = 0; model < 3; ++model)
+        {
+            auto base = ringsControls (model);
+            const auto y0 = rendered (base, x);
+            for (int p : { (int) kShape, (int) kTone, (int) kFeedback, (int) kDrift })
+            {
+                auto c = base;
+                c.p[p] = base.p[p] > 0.5f ? 0.1f : 0.9f;
+                CHECK (differ (y0, rendered (c, x)) > 0.05f);
+            }
+            Graph g;
+            g.connect (kRadioAudioOut, kResAudioIn);
+            g.connect (kRoomLevelOut, kResDampIn);                                 // ROOM LEVEL -> TONE (Rings BRIGHTNESS)
+            auto c = base;
+            c.plan = RoutingPlan::fromGraph (g);
+            c.room = { 0.9f, 0.0f, 0.0f };
+            const auto uncoupled = rendered (c, x);
+            auto quiet = c;
+            quiet.room = {};
+            CHECK (depth::same (uncoupled, rendered (quiet, x)));                  // COUPLE 0: the room does nothing
+            c.p[kCouple] = quiet.p[kCouple] = 0.8f;
+            CHECK (differ (rendered (quiet, x), rendered (c, x)) > 0.05f);         // COUPLE up: it does
+        }
+    }
+
+    currentTest = "RG-07b knob jumps with a Rings voice are click-free";
+    {
+        Buf x (48000);
+        for (size_t i = 0; i < x.size(); ++i) x[i] = 0.3f * std::sin (2.0f * kPi * 100.0f * (float) i / 48000.0f);
+        for (int model = 0; model < 3; ++model)
+        {
+            auto maxStep = [&] (Controls a, Controls b)
+            {
+                Engine e3;
+                e3.prepare (fs);
+                Buf firstHalf (x.begin(), x.begin() + 24000), secondHalf (x.begin() + 24000, x.end());
+                auto y1 = run (e3, firstHalf, a, 64);
+                const auto y2 = run (e3, secondHalf, b, 64);
+                y1.insert (y1.end(), y2.begin(), y2.end());
+                float m = 0;
+                for (size_t i = 2; i < y1.size(); ++i) m = std::max (m, std::abs (y1[i] - y1[i - 2]));
+                return m;
+            };
+            auto base = ringsControls (model);
+            base.p[kTone] = 0.2f; base.p[kPitch] = 0.1f;
+            const float steady = maxStep (base, base);
+            for (int p : { (int) kPitch, (int) kShape, (int) kTone, (int) kFeedback, (int) kDrift, (int) kMix, (int) kLevel })
+                for (float to : { 0.0f, 1.0f })
+                {
+                    auto b = base;
+                    b.p[p] = to;
+                    const float step2 = maxStep (base, b);
+                    CHECK (step2 < steady + 0.03f);
+                    if (step2 >= steady + 0.03f) std::printf ("    model %d, %s -> %.0f: step %.3f (steady %.3f)\n", model, paramNames[p], (double) to, (double) step2, (double) steady);
+                }
+        }
+    }
+
+    currentTest = "RG-07 switching to and from Rings is click-free";
+    {
+        Engine e;
+        e.prepare (fs);
+        auto c = defaults();
+        c.p[kTone] = 0.2f; c.p[kPitch] = 0.1f;
+        Buf tone (48000 * 3);
+        for (size_t i = 0; i < tone.size(); ++i) tone[i] = 0.3f * std::sin (2.0f * kPi * 100.0f * (float) i / 48000.0f);
+        Buf y;
+        static const int order[] = { 0, 3, 0, 4, 1, 5, 2, 3, 5, 0 };
+        for (int seg = 0; seg < 60; ++seg)
+        {
+            c.voice = order[seg % 10];
+            Buf l (2400), r (2400);
+            e.process (tone.data() + seg * 2400, tone.data() + seg * 2400, tone.data() + seg * 2400, l.data(), r.data(), 2400, c);
+            y.insert (y.end(), l.begin(), l.end());
+        }
+        float step = 0;
+        for (size_t i = 1; i < y.size(); ++i) step = std::max (step, std::abs (y[i] - y[i - 1]));
+        CHECK (step < 0.03f);
+        if (step >= 0.03f) std::printf ("    step %.3f\n", (double) step);
+    }
+
+    for (int model = 0; model < 3; ++model)                                        // cost, for --metrics
+    {
+        const auto in = noise (64, 0.3f);
+        auto c = ringsControls (model);
+        Engine e;
+        e.prepare (fs);
+        Buf l (64), r (64);
+        const int blocks = (int) (fs * 10 / 64);
+        timespec t0, t1;
+        clock_gettime (CLOCK_MONOTONIC, &t0);
+        for (int b = 0; b < blocks; ++b) e.process (in.data(), in.data(), in.data(), l.data(), r.data(), 64, c);
+        clock_gettime (CLOCK_MONOTONIC, &t1);
+        costNs[model] = (float) (((double) (t1.tv_sec - t0.tv_sec) * 1e9 + (double) (t1.tv_nsec - t0.tv_nsec)) / (blocks * 64.0));
+    }
+}
+} // namespace ringsTests
+#endif
+
 // ---- informational: what the control states do to level and brightness. Proxies only; nobody has listened to these.
 void metrics()
 {
@@ -1498,6 +1699,10 @@ void metrics()
     }
 
     strike::report();
+   #if WILDBAND_HAS_RINGS
+    std::printf ("\nWhole engine with a Rings voice selected, synthetic, 48 kHz, noise input: modal %.0f, sympathetic %.0f, string %.0f ns per sample (Rings state: %zu kB)\n",
+                 (double) ringsTests::costNs[0], (double) ringsTests::costNs[1], (double) ringsTests::costNs[2], RingsVoice::memoryBytes() / 1024);
+   #endif
     std::printf ("\nTuner static at the default STATIC setting: %.1f dBFS RMS at the engine's radio input (48 kHz)\n", (double) tuner::staticDb);
     std::printf ("\nSTRIKE correction, default patch vs the frozen P0 engine (local test source, 8 s): difference %.1f dB relative to P0, level change %+.2f dB\n",
                  (double) depth::strikeDefaultDifferenceDb, (double) depth::strikeDefaultLevelDb);
@@ -1537,6 +1742,9 @@ int main (int argc, char** argv)
     tuner::all();
     strike::all();
     voice::all();
+   #if WILDBAND_HAS_RINGS
+    ringsTests::all();
+   #endif
     if (argc > 1 && std::strcmp (argv[1], "--metrics") == 0) metrics();
     std::printf ("%d checks, %d failed\n", checks, failures);
     return failures;

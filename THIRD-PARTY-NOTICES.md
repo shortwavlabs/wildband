@@ -33,6 +33,16 @@ JUCE modules linked by the app: `juce_audio_utils`, `juce_audio_processors`, `ju
 
 "This software is based in part on the work of the Independent JPEG Group."
 
+### Only in builds configured with the Rings experiment (`-DEURORACK_DIR` or `-DWILDBAND_FETCH_RINGS=ON`)
+
+| Component | Version | Licence | Source | Licence text |
+|---|---|---|---|---|
+| Rings resonator DSP (`rings/dsp`, `rings/resources`) by Émilie Gillet, Mutable Instruments | `pichenettes/eurorack` at `f4cfa7697095a28d292bff758beb51deb49b5a86` | MIT | **not in this repository**; compiled unmodified from an upstream checkout | [`licenses/Rings-stmlib-MIT.txt`](licenses/Rings-stmlib-MIT.txt) |
+| stmlib (DSP and utility files Rings includes) by Émilie Gillet | `pichenettes/stmlib` at `e3bd7c9cc00e4364166f9905c0509b6ffd0535ec` | MIT | as above | same file |
+
+The default build does not include Rings. "Mutable Instruments" and "Rings" are named here to credit the origin;
+WILDBAND is not a Mutable Instruments product.
+
 The licence texts above are copied unmodified from the JUCE checkout at the pinned commit, and are placed in the
 app bundle (`WILDBAND.app/Contents/Resources/licenses/`) by the build.
 

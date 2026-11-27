@@ -53,7 +53,8 @@ and every external source it pulled in:
 | JUCE | always | commit `d60b7a78030661574a615b586d9325ba7a7fa7dd` (pinned in `CMakeLists.txt`) |
 | Third-party code inside JUCE (zlib, HarfBuzz, SheenBidi, LunaSVG/PlutoVG, libpng, IJG jpeglib) | always, via JUCE | covered by the JUCE commit; licence texts in `licenses/` |
 | VST3 SDK, AudioUnitSDK | plugin builds | covered by the JUCE commit; licence texts in `licenses/` |
-| Any optional upstream enabled at configure time (for example Rings and `stmlib` with `-DEURORACK_DIR` / `-DWILDBAND_FETCH_RINGS=ON`) | **only if enabled** | the upstream repositories and exact commits, and their licence texts in the bundle. A build that enables an optional upstream ships that upstream's source obligations too |
+| **Rings** (`pichenettes/eurorack` at `f4cfa7697095a28d292bff758beb51deb49b5a86`) and **stmlib** (`pichenettes/stmlib` at `e3bd7c9cc00e4364166f9905c0509b6ffd0535ec`), MIT | only with `-DEURORACK_DIR` or `-DWILDBAND_FETCH_RINGS=ON` | both repositories and commits; `licenses/Rings-stmlib-MIT.txt` in the bundle |
+| Any other optional upstream enabled at configure time | **only if enabled** | the upstream repositories and exact commits, and their licence texts in the bundle. A build that enables an optional upstream ships that upstream's source obligations too |
 
 A release built from a configuration not listed here is not ready to ship.
 
@@ -82,6 +83,7 @@ code and third-party material. **As of this commit:**
 | Test-harness and measurement patterns (plain `CHECK` macro, allocation gate, host-time late-callback counting, pinned-JUCE CMake layout) | **AFTERIMAGE** (`shortwavlabs/after-image`, AGPL-3.0-only, same author) | AGPL-3.0-only | Patterns re-typed; no AFTERIMAGE file is included. Its Freesound test recordings are **not** used |
 | "Dissolve" voice experiment (`src/Dissolve.h`) | New for WILDBAND, after the TRACE → CLOUD idea described for AFTERIMAGE | AGPL-3.0-only | Shares no code with AFTERIMAGE |
 | Research harness candidates (Korupt, Wyrd, Drift) | `shortwavlabs/vcv-tapestry` (GPL-3.0-or-later, same author); Korupt also uses VCV Rack SDK headers (GPL-3.0-or-later with a plugin exception); Drift and Wyrd use the Vult runtime (MIT, © 2015 Leonardo Laguna Ruiz) | as stated | **Compiled from their own repository when its path is given to CMake; none of their code is in this repository** |
+| Rings resonator DSP and `stmlib` (**optional LAB experiment**, `docs/p1/RINGS-EXPERIMENT.md`) | Émilie Gillet, Mutable Instruments — upstream `pichenettes/eurorack` at `f4cfa76`, `stmlib` at `e3bd7c9` | MIT | Compiled **unmodified from an upstream checkout** when the build is configured for it; not in this repository. `src/RingsVoice.h` is WILDBAND's own adapter around upstream's public interface. Notice in `licenses/Rings-stmlib-MIT.txt` |
 | AI assistance | Claude (Anthropic) | — | Much of this repository's code and documentation was written with AI assistance under the owner's direction; commits carry `Co-Authored-By` trailers. The owner is the copyright holder |
 | Knob image | Rendered with Blender from `assets/blender/knob.py` | AGPL-3.0-only | Placeholder asset |
 | Radio stations | Third-party broadcasters | — | Only public stream addresses are in the source; no audio is stored or distributed. Use of broadcast audio in the contest film needs separate rights |
@@ -90,7 +92,7 @@ code and third-party material. **As of this commit:**
 
 | Planned | Origin | Licence | Constraint |
 |---|---|---|---|
-| Rings resonator DSP | Mutable Instruments, Émilie Gillet — upstream `pichenettes/eurorack` (`rings/`, `stmlib/`) | **MIT** (STM32 projects); every file carries the MIT notice | Use the original upstream source at a pinned commit, keep every header, add the MIT text to `licenses/`. Do not use the hardware design files (CC BY-SA), AVR code (GPL-3.0), the "Mutable Instruments" name as branding, or TALORA's private adapters beyond concepts |
+| Rings, if chosen as the voice | as in the table above | MIT | Decide then whether to keep fetching upstream at the pinned commit or to vendor the used files (headers intact). Never the hardware design files (CC BY-SA), AVR code (GPL-3.0), the "Mutable Instruments" name as branding, or TALORA's private adapters beyond concepts |
 | LOOP, from Tapestry | `shortwavlabs/vcv-tapestry` (same author) | GPL-3.0-or-later | Combined with AGPL-3.0 code under GPLv3 §13; the Tapestry-derived files keep a GPL-3.0-or-later header and notice. No Rack SDK types; no file import/export |
 | Korupt | `vcv-tapestry` | GPL-3.0-or-later | As above, and the Rack SDK types are replaced, not copied |
 | Wyrd, Drift | `vcv-tapestry`, generated from the owner's Vult sources (reproduced byte for byte with `vultc` 0.4.15) | GPL-3.0-or-later; Vult runtime MIT | Keep the Vult runtime's MIT notice; keep the `.vult` sources and the exact generator command with the generated files |

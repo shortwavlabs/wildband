@@ -16,6 +16,9 @@
 
 #include "Dissolve.h"
 #include "Patch.h"
+#if WILDBAND_HAS_RINGS
+ #include "RingsVoice.h"      // optional experiment; upstream Rings is compiled from outside this repository
+#endif
 
 namespace wildband
 {
@@ -212,7 +215,9 @@ struct Controls
     float detune = 0.0f;   // Dial::offCentre
     float gap = 0.0f;      // Radio::tuneGap: 0 = the station is playing, 1 = the receiver is fetching the one just asked for
     int request = 0;       // Radio::request: changes with every station request, so each one gets its own static
-    int voice = 0;            // LAB comparison (docs/p0/VOICE-RESEARCH.md): 0 = Resonator (the instrument), 1 = Dissolve, 2 = Dissolve -> Resonator
+    // LAB comparison (docs/p0/VOICE-RESEARCH.md, docs/p1/RINGS-EXPERIMENT.md): 0 = Resonator (the instrument),
+    // 1 = Dissolve, 2 = Dissolve -> Resonator, and where Rings is built in: 3 = Rings modal, 4 = sympathetic strings, 5 = string
+    int voice = 0;
     int strikeResponse = 0;   // LAB comparison (docs/p0/STRIKE-RESPONSE.md): 0 = Held (the existing behaviour), 1 = Fast, 2 = Organic
     EnvFrame room;         // EnvBus::read
     RoutingPlan plan = RoutingPlan::fromGraph (Graph::defaultPatch());
@@ -237,6 +242,9 @@ public:
         aMod = onePoleCoeff (0.02, fs / kControlInterval);
         tunerStatic.prepare (fs);
         dissolve.prepare (fs);
+       #if WILDBAND_HAS_RINGS
+        rings.prepare (fs);
+       #endif
         gapSeconds = 0.0f;
         staticMuted = false;
         strikeRelease = (float) std::exp (-1.0 / (2.0 * fs / kControlInterval));
@@ -261,8 +269,12 @@ public:
     void reset() noexcept
     {
         staticGain = 0.0f;
-        dissolve.reset();
+        if (dissolveHeard || dissolveRunning) dissolve.reset();      // (1-2 MB: only if it has been used since it was last cleared)
         dissolveHeard = false;
+       #if WILDBAND_HAS_RINGS
+        if (ringsHeard || ringsRunning) rings.reset();
+        ringsHeard = false;
+       #endif
         for (auto& l : lines) std::fill (l.begin(), l.end(), 0.0f);
         for (auto& d : refDelay) std::fill (d.begin(), d.end(), 0.0f);
         lp = {}; dc = {}; svfA = {}; svfB = {}; refLp = {};
@@ -284,6 +296,13 @@ public:
         if (! labOn && voiceW[1] <= 1.0e-4f && voiceW[2] <= 1.0e-4f) { if (dissolveHeard) dissolveHeard = ! dissolve.forgetSome (16384); }
         else if (labOn && dissolveHeard && voiceW[1] <= 1.0e-4f && voiceW[2] <= 1.0e-4f && ! dissolveRunning) { dissolve.reset(); }   // re-selected mid-erase: finish at once
         dissolveRunning = labOn || voiceW[1] > 1.0e-4f || voiceW[2] > 1.0e-4f;
+       #if WILDBAND_HAS_RINGS
+        const bool ringsOn = c.voice >= 3 && c.voice <= 5;
+        if (! ringsOn && ringsW <= 1.0e-4f && ringsHeard) { rings.reset(); ringsHeard = false; }      // deselected and faded: forget
+        ringsRunning = ringsOn || ringsW > 1.0e-4f;
+        ringsT = ringsOn ? 1.0f : 0.0f;
+        if (ringsOn) ringsP.model = c.voice - 3;
+       #endif
         bool bad = false;
         float peak = 0.0f;
 
@@ -363,6 +382,17 @@ public:
                 wetL = (1.0f - voiceW[1]) * wetL + voiceW[1] * dl;
                 wetR = (1.0f - voiceW[1]) * wetR + voiceW[1] * dr;
             }
+           #if WILDBAND_HAS_RINGS
+            if (ringsRunning)                                                // voices 3-5: Rings takes the resonators' place (24 samples late)
+            {
+                ringsHeard = true;
+                ringsW += aMode * (ringsT - ringsW);
+                float rl, rr;
+                rings.process (0.5f * (xl + xr), rl, rr, ringsP);
+                wetL = (1.0f - ringsW) * wetL + ringsW * 0.5f * rl;
+                wetR = (1.0f - ringsW) * wetR + ringsW * 0.5f * rr;
+            }
+           #endif
 
             // ---- reference chain: an ordinary resonant filter into a feedback delay, for A/B listening
             float refL = 0.0f, refR = 0.0f;
@@ -553,7 +583,18 @@ private:
         dissolveP.spray = clamp01 (drift + 0.5f * cpl * cvIn (kResDriftIn));
         dissolveP.regen = 0.95f * pt[kFeedback] + 0.3f * cpl * cvIn (kResFeedbackIn);
         dissolveP.damp = dampT;
-        dissolveP.drive = std::min (3.0f, 2.0f * exciteT);                                  // keeps loudness roughly level as the loop closes
+        dissolveP.drive = std::min (3.0f, 2.0f * exciteT);
+       #if WILDBAND_HAS_RINGS
+        // Rings borrows the panel too: PITCH = note, SHAPE = STRUCTURE, TONE = BRIGHTNESS, FEEDBACK = DAMPING (decay),
+        // DRIFT = POSITION, under the same control inputs. Upstream interpolates these across each 24-sample block.
+        // (pc: the smoothed knob values - upstream interpolates only within a block, so jumps must arrive smoothed)
+        ringsP.note = 36.0f + 48.0f * pc[kPitch] + pc[kCouple] * cvIn (kResPitchIn);
+        ringsP.structure = clamp01 (pc[kShape] + 0.35f * pc[kCouple] * cvIn (kResShapeIn));
+        ringsP.brightness = clamp01 (pc[kTone] + 0.5f * pc[kCouple] * cvIn (kResDampIn));
+        ringsP.damping = clamp01 (pc[kFeedback] + 0.3f * pc[kCouple] * cvIn (kResFeedbackIn));
+        ringsP.position = clamp01 (pc[kDrift] + 0.5f * pc[kCouple] * cvIn (kResDriftIn));
+        ringsP.drive = std::min (3.0f, 2.0f * excite);
+       #endif                                  // keeps loudness roughly level as the loop closes
     }
 
     void smooth() noexcept
@@ -598,6 +639,12 @@ private:
     Dissolve dissolve;
     Dissolve::Params dissolveP, dissolveNow;
     bool dissolveHeard = false, dissolveRunning = false;
+   #if WILDBAND_HAS_RINGS
+    RingsVoice rings;
+    RingsVoice::Params ringsP;
+    float ringsW = 0, ringsT = 0;
+    bool ringsHeard = false, ringsRunning = false;
+   #endif
     float voiceW[3] = {}, voiceT[3] = {};
     float staticGain = 0, staticT = 0, gapSeconds = 0;
     int lastRequest = 0;
