@@ -184,6 +184,7 @@ public:
         for (auto& d : refDelay) d.assign ((size_t) refSize, 0.0f);
         aParam = onePoleCoeff (0.015, fs); aFreq = onePoleCoeff (0.025, fs); aMode = onePoleCoeff (0.03, fs);
         aMod = onePoleCoeff (0.02, fs / kControlInterval);
+        strikeRelease = (float) std::exp (-1.0 / (2.0 * fs / kControlInterval));
         aDc = onePoleCoeff (1.0 / (2.0 * kPi * 5.0), fs);
         aFast = onePoleCoeff (0.002, fs); aFastRel = onePoleCoeff (0.06, fs); aSlow = onePoleCoeff (0.3, fs);
         reset();
@@ -197,6 +198,7 @@ public:
         lp = {}; dc = {}; svfA = {}; svfB = {}; refLp = {};
         w = refW = 0; tick = 0; ringPhase = refLfo = 0.0f; rFast = rSlow = 0.0f;
         mod = {};
+        strikeSeen = 0.0f;
         for (int i = 0; i < kLines; ++i) driftPhase[(size_t) i] = 0.7f * (float) i;
         first = true;
     }
@@ -352,7 +354,17 @@ private:
             auto& m = mod[(size_t) (in - kFirstInput)];
             const float depth = plugged ? validDepth (c.plan.depthOf (in)) : 0.0f;
             m += aMod * (depth * (plugged ? cv[from - kFirstCvOut] : 0.0f) - m);     // signed; glides when a cable or its depth moves
-            if (in == kResExciteIn) strikePlugged += aMod * (std::max (0.0f, depth) - strikePlugged);
+            if (in == kResExciteIn)
+            {
+                // How much the steady excitation backs off. P0 backed off whenever a cable was in STRIKE, even from a
+                // source producing nothing, so a dead source dimmed the instrument. Now the back-off needs a source
+                // that has actually been active lately: `strikeSeen` follows the source's recent peak (instant up,
+                // about 2 s down) and counts as fully present from 0.1. A source that reads zero has no influence.
+                const float source = plugged ? cv[from - kFirstCvOut] : 0.0f;
+                strikeSeen = std::max (source, strikeSeen * strikeRelease);
+                if (strikeSeen < 1.0e-3f) strikeSeen = 0.0f;
+                strikePlugged += aMod * (std::max (0.0f, depth) * std::min (1.0f, strikeSeen * 10.0f) - strikePlugged);
+            }
         }
         auto cvIn = [this] (int in) { return mod[(size_t) (in - kFirstInput)]; };
         const float cpl = pt[kCouple], drift = pt[kDrift];
@@ -385,8 +397,9 @@ private:
         const float fb = 1.0f - pt[kFeedback];
         gainT = std::max (0.0f, std::min (1.25f, 1.1f * (1.0f - fb * fb) + 0.2f * cpl * cvIn (kResFeedbackIn))); // unity loop gain near FEEDBACK 0.7
         coupleT = 0.45f * drift;
-        // STRIKE input. Positive depth: the steady excitation backs off (in proportion to the depth) and the control
-        // signal strikes the resonators. Negative depth: the steady excitation stays and the signal ducks it.
+        // STRIKE input. Positive depth: while the source is active the steady excitation backs off (in proportion to
+        // the depth) and the control signal strikes the resonators. Negative depth: the steady excitation stays and
+        // the signal ducks it.
         const float strike = cpl * strikePlugged;
         exciteT = std::max (0.0f, 0.5f * ((1.0f - 0.7f * strike) + 5.0f * cpl * cvIn (kResExciteIn)));
         const float g2 = gainT * gainT;
@@ -429,7 +442,7 @@ private:
     float excite = 0, exciteT = 0, wetGain = 0, wetGainT = 0, rootHz = 110;
     float ringPhase = 0, refLfo = 0, rFast = 0, rSlow = 0;
     std::array<float, kNumInputs> mod {};   // smoothed value at each resonator input (index 0, the audio input, unused)
-    float srcW[2] = {}, srcT[2] = {}, strikePlugged = 0, aMod = 0;
+    float srcW[2] = {}, srcT[2] = {}, strikePlugged = 0, strikeSeen = 0, strikeRelease = 0, aMod = 0;
     float aParam = 0, aFreq = 0, aMode = 0, aDc = 0, aFast = 0, aFastRel = 0, aSlow = 0;
 };
 
