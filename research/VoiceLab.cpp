@@ -270,6 +270,11 @@ int main (int argc, char** argv)
         { "resonator", "WILDBAND", "baseline voice", 6 * 4096 * 4, [] (const Buf& x, const std::vector<EnvFrame>* w) { return engineRender (x, w, Mode::Engine, 0); } },
         { "dissolve", "WILDBAND (new, D2)", "rolling granular delay", [] { Dissolve d; d.prepare (fs); return d.memoryBytes(); }(), [] (const Buf& x, const std::vector<EnvFrame>* w) { return engineRender (x, w, Mode::Engine, 1); } },
         { "dissolve-into-resonator", "WILDBAND (new, D2)", "grains excite the resonators", 0, [] (const Buf& x, const std::vector<EnvFrame>* w) { return engineRender (x, w, Mode::Engine, 2); } },
+       #if WILDBAND_HAS_RINGS
+        { "rings-modal", "Rings (Emilie Gillet, MIT), upstream in place", "P1-R, external excitation", RingsVoice::memoryBytes(), [] (const Buf& x, const std::vector<EnvFrame>* w) { return engineRender (x, w, Mode::Engine, 3); } },
+        { "rings-sympathetic", "Rings (Emilie Gillet, MIT), upstream in place", "P1-R, external excitation", RingsVoice::memoryBytes(), [] (const Buf& x, const std::vector<EnvFrame>* w) { return engineRender (x, w, Mode::Engine, 4); } },
+        { "rings-string", "Rings (Emilie Gillet, MIT), upstream in place", "P1-R, external excitation", RingsVoice::memoryBytes(), [] (const Buf& x, const std::vector<EnvFrame>* w) { return engineRender (x, w, Mode::Engine, 5); } },
+       #endif
        #if WILDBAND_LAB_RACK
         { "korupt", "vcv-tapestry, in place (D1)", "as written, Rack SDK types", sizeof (ShortwavDSP::KoruptDSP) + sizeof (ShortwavDSP::KoruptInputStage), koruptRender },
        #endif

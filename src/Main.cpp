@@ -779,7 +779,7 @@ private:
 
         juce::String text = juce::String (wanted != tuned ? "TUNING" : Radio::name (state)) + "  " + stations[(size_t) (wanted != tuned ? wanted : tuned)].name;
         if (instrument.engine.meterStatic.load() > 0.01f) text << "  |  static (synthesized)";
-        if (instrument.voice.load() != 0) text << "  |  LAB voice: " << (instrument.voice.load() == 1 ? "Dissolve" : "Dissolve > Resonator");
+        if (instrument.voice.load() != 0) text << "  |  LAB voice: " << labVoiceName (instrument.voice.load());
         if (instrument.strikeResponse.load() != 0) text << "  |  LAB strike: " << (instrument.strikeResponse.load() == 1 ? "B Fast" : "C Organic");
         if (state == Radio::State::Playing || state == Radio::State::Buffering) text << "  |  " << instrument.radio.detail().upToFirstOccurrenceOf (" - ", false, false) << "  |  buffer " << juce::String (instrument.radio.bufferedSeconds(), 1) << " s";
         else if (instrument.radio.detail().isNotEmpty()) text << "  |  " << instrument.radio.detail();
@@ -862,6 +862,17 @@ private:
         selectStation (slot);
     }
 
+   #if WILDBAND_HAS_RINGS
+    static constexpr int kLabVoices = 6;
+   #else
+    static constexpr int kLabVoices = 3;
+   #endif
+    static juce::String labVoiceName (int voice)
+    {
+        static const char* names[] = { "Resonator", "Dissolve", "Dissolve > Resonator", "Rings modal", "Rings sympathetic", "Rings string" };
+        return names[juce::jlimit (0, 5, voice)];
+    }
+
     /** LAB: alternatives the owner is comparing by ear. A menu, on purpose: nothing here has earned a place on the panel. */
     void showLab()
     {
@@ -873,9 +884,13 @@ private:
         menu.addSectionHeader ("Voice experiment (same knobs and cables; see docs/p0/VOICE-RESEARCH.md)");
         static const char* voices[] = { "Resonator - the instrument as it is", "Dissolve - rolling granular delay: PITCH = time, SHAPE = echo..cloud, DRIFT = spray, FEEDBACK = regeneration", "Dissolve -> Resonator - the grains strike the resonators" };
         for (int i = 0; i < 3; ++i) menu.addItem (200 + i, voices[i], true, instrument.voice.load() == i);
+       #if WILDBAND_HAS_RINGS
+        static const char* ringsVoices[] = { "Rings: modal resonator - PITCH = note, SHAPE = structure, TONE = brightness, FEEDBACK = damping, DRIFT = position", "Rings: sympathetic strings", "Rings: inharmonic string" };
+        for (int i = 0; i < 3; ++i) menu.addItem (203 + i, ringsVoices[i], true, instrument.voice.load() == 3 + i);
+       #endif
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (labButton), [this] (int result)
         {
-            if (result >= 200 && result < 203) { instrument.voice = result - 200; settingsDirty = true; flash (juce::String ("LAB voice: ") + (result == 200 ? "Resonator" : result == 201 ? "Dissolve (experimental)" : "Dissolve -> Resonator (experimental)")); }
+            if (result >= 200 && result < 206) { instrument.voice = result - 200; settingsDirty = true; flash (juce::String ("LAB voice: ") + labVoiceName (result - 200) + (result == 200 ? "" : " (experimental)")); }
             if (result >= 100 && result < 103) { instrument.strikeResponse = result - 100; settingsDirty = true; flash (juce::String ("LAB: STRIKE response ") + "ABC"[result - 100]); }
         });
     }
@@ -1087,7 +1102,7 @@ private:
             if (const int note = p.getIntValue ("noteAction" + juce::String (target - kNumParams), -1); note >= 0 && note < 128) instrument.noteMap[(size_t) note] = (int8_t) target;
         }
         instrument.strikeResponse = juce::jlimit (0, 2, p.getIntValue ("labStrikeResponse", 0));
-        instrument.voice = juce::jlimit (0, 2, p.getIntValue ("labVoice", 0));
+        instrument.voice = juce::jlimit (0, kLabVoices - 1, p.getIntValue ("labVoice", 0));
         instrument.params[kLevel] = juce::jmin (instrument.params[kLevel].load(), paramDefaults[kLevel]);   // never start loud
         // "cables" stays in P0's format so both builds can share one settings file; depths live under their own key
         if (p.containsKey ("cables")) patch.graph = loadPatch (p.getValue ("cables").toStdString(), p.getValue ("cableDepths").toStdString());

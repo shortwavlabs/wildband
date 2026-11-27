@@ -67,3 +67,56 @@ Renders for listening: `wildband_voice_lab`, level-matched, three models × six 
 
 Not automatable (owner): which model, if any, is more expressive than the current resonator on speech, music,
 transients and static; whether it should replace or complement it; which controls matter.
+
+---
+
+## Results (added after implementation, 2026-11-27)
+
+**Technical evidence only; every run was muted. Nobody has listened to Rings in WILDBAND.**
+
+`wildband_tests`: **884 checks, 0 failed** with Rings configured (831 without, unchanged).
+
+| ID | Result | Notes |
+|---|---|---|
+| RG-01 | **Pass** | Default build: no Rings, 831 checks. With `-DEURORACK_DIR`: three Rings voices in the voice lab and in LAB |
+| RG-02 | **Pass** | All three models: below −90 dBFS twelve seconds after the input stops; exact silence after PANIC |
+| RG-03 | **Pass** | Modal model within 10 cents of the PITCH note at C3, C4 and C5 (48 kHz) |
+| RG-04 | **Pass** | 18 hostile runs across the three models at 44.1 and 48 kHz; deterministic; 0 allocations while processing, including model switches and PANIC |
+| RG-05 | **Pass** | Identical output for block sizes 1, 64 and 1000; an impulse first appears 24–26 samples later |
+| RG-06 | **Pass** | STRUCTURE, BRIGHTNESS, DAMPING and POSITION each change the output in every model; a ROOM LEVEL → TONE cable changes it with COUPLE up and not at all with COUPLE at 0 |
+| RG-07 | **Pass** | Switching among the resonator, Dissolve and the three Rings models every 50 ms: no step |
+| RG-08 | **Pass** | `git status` clean in the upstream checkout and in its `stmlib` submodule: compiled unmodified |
+
+The adapter (`src/RingsVoice.h`, 110 lines, WILDBAND's own) worked against upstream's public interface at the first
+attempt; eight upstream source files are compiled.
+
+### Measured
+
+| | Current resonator | Rings modal | Rings sympathetic | Rings string |
+|---|---|---|---|---|
+| Whole engine, synthetic, 48 kHz, ns per sample (voice lab, per fixture) | 49–65 | 103–117 | 114–129 | 80–96 |
+| State | about 0.1 MB | 172 kB (shared by the three models) | | |
+| Added latency | 0 | 24 samples (0.5 ms at 48 kHz) | | |
+| CoreAudio, MiniFuse 1, radio live in every window | worst 4.0 % of the buffer period | — | **worst 6.4 %** (96 kHz / 64), 0 late callbacks ([`evidence/coreaudio-rings-sympathetic.md`](evidence/coreaudio-rings-sympathetic.md)) | — |
+
+Only the costliest model (sympathetic strings) was swept on CoreAudio. Roughly: Rings costs about twice the
+current resonator and is still far inside the budget.
+
+### Honest limits
+
+- **Fixed 48 kHz inside.** At 44.1 or 96 kHz the pitch is corrected but timbre and decay times scale with the
+  device rate (at 96 kHz everything rings half as long and an octave "brighter" in filter terms). Do not judge Rings
+  at 96 kHz from this build. A resampler is the proper fix if Rings is chosen.
+- External excitation only. The strummed / internally excited modes, polyphony above 1, the chord table and the
+  "easter egg" string synth were not connected.
+- Level: Rings' outputs are scaled by a fixed 0.5 here; before matching, its levels sit within a few dB of the
+  current resonator's on most fixtures, 10 dB apart on some. Listen to the level-matched renders, not to raw LAB
+  loudness, when comparing.
+- Upstream's own reverb and limiter are left as they are; they are part of what is heard.
+- Rings is fetched from outside the repository; a build without it has no Rings voices.
+
+### How to audition
+
+Live: **LAB → Voice experiment → Rings: modal / sympathetic strings / inharmonic string**, at 48 kHz. Same knobs:
+PITCH = note, SHAPE = structure, TONE = brightness, FEEDBACK = damping, DRIFT = position.
+Offline: `build/voice-lab/*__rings-*.wav` beside `*__resonator*.wav`, level-matched, WORLD on and off.

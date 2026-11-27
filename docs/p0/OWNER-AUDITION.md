@@ -6,8 +6,9 @@ Everything is in **one build**. Monitors down first; nobody has heard any of thi
 open /Users/shortwavlabs/Workspace/shortwavlabs/wildband-integration/build/WILDBAND_artefacts/Release/WILDBAND.app
 ```
 
-This binary is built from the top of the stack: branch `p0/voice-lab` (PR #10), which contains the integration
-candidate (#7), the STRIKE responses (#8), the tuner restart fix (#9) and the voice lab.
+This binary is built from the top of the stack: branch `p1/rings`, which contains the integration candidate (#7),
+the STRIKE responses (#8), the tuner restart fix (#9), the voice lab (#10), the licence (#11) and the Rings
+experiment. The bundle now carries its licence and third-party notices in `Contents/Resources`.
 
 It keeps its own settings (`WILDBAND-integration.settings`, started as a copy of your existing setup) and never
 writes the file the four older builds share. **LAB choices are remembered between launches**; while either is not at
@@ -69,6 +70,17 @@ DRIFT = spray, FEEDBACK = regeneration, TONE = damping. Try a speech station, th
 and SHAPE near the top. Then pull and re-plug ROOM cables, with DEPTH. PANIC clears it.
 
 Questions: is it a voice or an effect? Does it belong with the resonators, instead of them, or not at all?
+
+## 4b. Rings — LAB → Voice experiment → Rings (live, at 48 kHz)
+
+The roadmap's priority resonator experiment: Émilie Gillet's Rings DSP (MIT), driven by the broadcast. Three models:
+**modal**, **sympathetic strings**, **inharmonic string**. Same knobs: PITCH = note, SHAPE = structure, TONE =
+brightness, FEEDBACK = damping (decay), DRIFT = position. Keep the interface at **48 kHz** (it is tuned for that).
+
+Compare with **Resonator** on the same station and knob positions: speech, music, something percussive, and static
+during a station change. Then patch ROOM LEVEL → TONE and ROOM HITS → STRIKE and use DEPTH.
+
+Question: is any of the three more expressive than the current resonator — enough to replace it, or to sit beside it?
 
 ## 5. Candidate renders (offline, 5 minutes per fixture)
 
