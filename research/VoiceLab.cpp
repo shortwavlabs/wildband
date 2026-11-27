@@ -178,7 +178,7 @@ Stereo engineRender (const Buf& x, const std::vector<EnvFrame>* world, Mode mode
 }
 
 #if WILDBAND_LAB_TAPESTRY
-Stereo wyrdRender (const Buf& x, const std::vector<EnvFrame>* world)   // Wyrd's time/filter delay, as written; WORLD: level -> decay
+Stereo wyrdRender (const Buf& x, const std::vector<EnvFrame>* world)   // Wyrd's time/filter delay, as written, wet only; WORLD: level -> decay
 {
     auto delay = std::make_unique<shortwav::wyrd::TimeFilterExperiment>();
     Stereo out { Buf (N), Buf (N) };
@@ -186,7 +186,7 @@ Stereo wyrdRender (const Buf& x, const std::vector<EnvFrame>* world)   // Wyrd's
     {
         const float level = world != nullptr ? (*world)[i / 64].level : 0.0f;
         const auto r = delay->process (x[i] * 5.0f, 0.0f, 0.42f, 0.0f, std::min (1.0f, 0.45f + 0.45f * level), 0.55f, 0.3f, (float) fs);   // Rack levels: +/-5 V
-        out.l[i] = out.r[i] = 0.5f * x[i] + 0.2f * r.wet;
+        out.l[i] = out.r[i] = 0.2f * r.wet;                                   // wet only, like every other voice here (Rack +/-5 V -> +/-1)
     }
     return out;
 }
@@ -272,7 +272,7 @@ int main (int argc, char** argv)
         { "korupt", "vcv-tapestry, in place (D1)", "as written, Rack SDK types", sizeof (ShortwavDSP::KoruptDSP) + sizeof (ShortwavDSP::KoruptInputStage), koruptRender },
        #endif
        #if WILDBAND_LAB_TAPESTRY
-        { "wyrd-timefilter", "vcv-tapestry, in place (D3)", "as written; dry + delay", (size_t) shortwav::wyrd::TimeFilterExperiment::kMaxDelaySamples * 4 + (32768 + 24576 + 16384) * 4, wyrdRender },
+        { "wyrd-timefilter", "vcv-tapestry, in place (D3)", "as written; wet only", (size_t) shortwav::wyrd::TimeFilterExperiment::kMaxDelaySamples * 4 + (32768 + 24576 + 16384) * 4, wyrdRender },
        #endif
     };
 
@@ -306,14 +306,38 @@ int main (int argc, char** argv)
                 if (r > kSilent) { const float gain = (float) (kTarget / r); for (size_t i = 0; i < N; ++i) { s->l[i] *= gain; s->r[i] *= gain; } }
                 if (peak (*s) > 1.0f) { const float trim = 0.999f / peak (*s); for (size_t i = 0; i < N; ++i) { s->l[i] *= trim; s->r[i] *= trim; } notes += "- `" + stem + "` would have clipped at the matched level and was turned down by " + std::to_string (-20 * std::log10 (trim)).substr (0, 3) + " dB.\n"; }
             }
-            writeWav (dir + "/" + stem + "__world-off.wav", off);
-            writeWav (dir + "/" + stem + "__world-on.wav", on);
+            const std::string where = v.name == "korupt" ? dir + "/korupt-unverified" : dir;      // see the diagnostic in the report
+            mkdir (where.c_str(), 0755);
+            writeWav (where + "/" + stem + "__world-off.wav", off);
+            writeWav (where + "/" + stem + "__world-on.wav", on);
            #if WILDBAND_LAB_RACK
             if (v.name == "korupt") { char k[200]; std::snprintf (k, sizeof (k), "|  |  | %s: mean lock %.2f, tracking %.2f, glitch %.3f (WORLD on) |  |  |  |  |  |  |  |\n", f.first, lastKorupt.lock, lastKorupt.tracking, lastKorupt.glitch); report += k; }
            #endif
         }
 
     if (! notes.empty()) report += "\nNot exactly level-matched:\n" + notes;
+   #if WILDBAND_LAB_RACK
+    {
+        // Diagnostic: Korupt's core driven exactly as its own unit tests drive it (a 400 Hz square straight into
+        // KoruptDSP, no input stage), then silence. This separates "the lab drives it wrongly" from "that is what it does".
+        ShortwavDSP::KoruptDSP dsp;
+        dsp.setSampleRate ((float) fs); dsp.reset();
+        ShortwavDSP::KoruptParams p;
+        double lock = 0, tracking = 0, maxLock = 0;
+        for (int i = 0; i < 48000 * 4; ++i) { const int phase = i % 120; const auto r = dsp.process (phase < 60 ? 1.0f : -1.0f, phase == 0, phase < 60, p); if (i >= 48000) { lock += r.lock; tracking += r.tracking; maxLock = std::max (maxLock, (double) r.lock); } }
+        ShortwavDSP::KoruptResult silent;
+        for (int i = 0; i < 48000 * 4; ++i) silent = dsp.process (0.0f, false, false, p);
+        ShortwavDSP::KoruptInputStage stage;
+        stage.setSampleRate ((float) fs); stage.reset();
+        ShortwavDSP::KoruptConditionedInput rest;
+        for (int i = 0; i < 48000 * 2; ++i) rest = stage.process (0.0f);
+        char line[600];
+        std::snprintf (line, sizeof (line), "\n## Korupt diagnostic\n\nCore driven as in its own tests (400 Hz square, default parameters, 3 s): mean lock %.3f, highest lock %.3f, mean tracking %.2f. "
+                       "Then 4 s of zero input straight into the core: tracking %.3f. Its input stage fed 2 s of silence settles at audio = %.3f, comparator = %.3f, envelope = %.3f "
+                       "(the core is given that 'audio' value, so with the input stage in front it does not see silence as zero).\n", lock / (48000.0 * 3), maxLock, tracking / (48000.0 * 3), (double) silent.tracking, (double) rest.audio, (double) rest.comparator, (double) rest.envelope);
+        report += line;
+    }
+   #endif
    #if WILDBAND_LAB_TAPESTRY
     report += "\n## Drift as a control source (INTERNAL modulation, not WORLD)\n\nResonator with PITCH and TONE driven by: nothing, Drift (vcv-tapestry, in place), a plain 0.21 Hz sine.\n\n| fixture | Drift vs none dB | sine vs none dB | Drift ns/sample (core alone) |\n|---|---|---|---|\n";
     for (auto& f : fixtures)

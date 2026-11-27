@@ -138,11 +138,11 @@ preferred.**
 
 | ID | Result | Notes |
 |---|---|---|
-| VL-01 | **Pass** | `wildband_voice_lab` builds with no external path; five in-repo voices × six fixtures × WORLD on/off |
+| VL-01 | **Pass** | Compiled and run with no external path (61 files: five in-repo voices × six fixtures × WORLD on/off, plus the report). First marked passed without having been run that way; corrected after review |
 | VL-02 | **Pass with one exception** | All renders finite. Matched to −23 dBFS RMS (the −20 dBFS first planned left too little headroom for crest factors near 20 dB). One file, `percussion__dissolve`, would still have clipped and was turned down 1.5 dB; the report lists it. A render below −70 dBFS is left alone and reported as silent (the first version amplified Wyrd's −93 dBFS idle noise up to the matched level) |
 | VL-03 | **Pass** | Full table: [`evidence/voice-lab-report.md`](evidence/voice-lab-report.md) |
 | VL-04 | **Pass** | With `-DTAPESTRY_DIR` and `-DRACK_SDK_DIR`, Wyrd's time/filter delay, Drift and Korupt are compiled from `vcv-tapestry` in place, Korupt against the Rack SDK headers |
-| VL-05 | **Pass** | No code from another repository and no audio file is in this repository. The renders (102 WAV files, about 190 MB) are in the build tree |
+| VL-05 | **Pass** | No code from another repository and no audio file is in this repository. The renders (about 100 WAV files, about 190 MB) are in the build tree; Korupt's are in a `korupt-unverified` subfolder |
 
 To make the listening files:
 
@@ -159,15 +159,17 @@ fixture side by side.
 
 ### Dissolve (D2, new WILDBAND code)
 
-`wildband_tests`: **802 checks, 0 failed** (788 before, plus DV-01 … DV-06).
+`wildband_tests`: **831 checks, 0 failed** (788 before, plus DV-01 … DV-07).
 
 | ID | Result |
 |---|---|
-| DV-01 … DV-04, DV-06 | **Pass** |
-| DV-05 | **Pass.** With the resonator selected nothing changed (all earlier checks, including sample-identical parity with the frozen engine); switching between the three LAB voices every 50 ms adds no step |
+| DV-01 … DV-04 | **Pass** |
+| DV-05 | **Pass.** With the resonator selected nothing changed (all earlier checks, including sample-identical parity with the frozen engine); switching between the three LAB voices every 50 ms adds no step. **Extended after review:** jumping SHAPE, TONE, FEEDBACK, MIX, LEVEL, DRIFT or COUPLE with a LAB voice selected adds no step either — Dissolve's parameters were first passed in unsmoothed and are now smoothed like the resonator's |
+| DV-06 | **Failed as first built, fixed after review.** While deselected, Dissolve's history was neither written nor cleared, so re-selecting it could replay up to 1.6 s of whatever had been on air earlier — contrary to "temporary, continuously overwritten". Now, once the voice is deselected and has faded out, the history is erased (in pieces, so no single audio callback pays for it) |
+| DV-07 (added) | **Pass.** Dissolve hears noise for a second, is deselected for three, and is re-selected with silent input: the output is sample-identical to an engine in which Dissolve had never run |
 
 Measured: about 14 ns per sample on top of the engine (one thread, synthetic); 1.0 MB of history at 48 kHz.
-**Not measured: CoreAudio callback timing with a LAB voice selected.**
+CoreAudio callback timing with Dissolve selected: see `OWNER-AUDITION.md`, "What was measured on this build".
 
 ### What the numbers show (and what they cannot)
 
@@ -176,20 +178,30 @@ Korupt as written 38–49 ns; Wyrd's time/filter delay as written 65–85 ns; Dr
 rate; a control source would run at control rate, about 16 times cheaper). Memory: Wyrd as written 4.4 MB, Dissolve
 1.0 MB, resonator 0.1 MB, Korupt and Drift negligible.
 
-"WORLD on vs off" (how much the scripted room track changed the output, relative to the output): resonator −4 to
-+6 dB, Dissolve −4 to −6 dB, Dissolve → Resonator 0 to +9 dB, Wyrd −1 to −8 dB, Korupt −6 to −9 dB. All respond;
-these figures say that a difference exists, not that it is musical.
+"WORLD on vs off" (how much the scripted room track changed the output, relative to the output), from the current
+report: every candidate responds, by between about −9 and +9 dB depending on voice and fixture. These figures say
+that a difference exists, not that it is musical; see the table in the evidence file for each one.
 
 Findings worth acting on:
 
-- **Korupt's study is incomplete.** Driven the way its own module drives it, in this harness it reported *lock ≈ 0
-  on every fixture, including a pure 220 Hz sine*, "tracking" 1.0 even on silence, and an output near full scale
-  (−0.5 to −2.8 dBFS RMS, crest 3–5 dB) **including on silence**. A PLL that never locks on a sine is more likely a
-  fault in how the harness drives it than a property of Korupt; its own tests (which need a Rack SDK build) were not
-  run. Do not draw conclusions about Korupt from these files. One real point stands regardless: the first WORLD
-  route tried (room activity → RATE) changed nothing in its output.
+- **Korupt, as written, does two things that need the owner's knowledge of it before anything is concluded.**
+  Driven the way its own module drives it, it reported *lock ≈ 0 on every fixture, including a pure 220 Hz sine*,
+  "tracking" 1.0 even on silence, and an output near full scale (−0.5 to −2.8 dBFS RMS, crest 3–5 dB) **including
+  on silence**. A diagnostic then drove its core exactly as its own unit tests do (a 400 Hz square straight into
+  `KoruptDSP`, default parameters):
+  - *Lock stayed at 0.000 there too* (highest value in 3 s: 0.000, with tracking at 1.00). Its tests only assert that
+    lock is finite and within 0..1, never that it rises. So "never locks" is not the lab's wiring; whether it is the
+    default parameters, a property of the loop, or a defect is not established.
+  - *Zero straight into the core gives tracking 0.000* (as its test expects). But its **input stage fed silence
+    settles at audio = −0.277 and comparator = +0.843**, and the module hands that "audio" to the core — so behind
+    its input stage, silence is not zero, which is why it "tracks" and sounds on silence.
+  For WILDBAND, where silence between stations is real and valid, that second point matters: a Korupt voice would
+  need gating or a different input conditioning. The Korupt renders are kept in `korupt-unverified/` for that reason.
+  Also: the first WORLD route tried (room activity → RATE) changed nothing in its output.
 - **Wyrd's delay is not silent on silence** (−105 dBFS idle); harmless, but a WILDBAND version should be exactly
-  silent after PANIC. As written it allocates 4.4 MB whatever the sample rate.
+  silent after PANIC. As written it allocates 4.4 MB whatever the sample rate. Its renders are wet-only, like every
+  other voice here (the first version mixed in half the dry signal, which was not like-for-like); wet-only it sits
+  about 8–20 dB below the fixture before matching.
 - **Dissolve's cloud has a high crest factor** (up to 19–21 dB on percussion). Loud grains will meet the engine's
   safety clip; the grain normalisation needs listening and probably revising.
 - **Drift against a plain sine** as a control source: within 0–2 dB of each other in how much they change the

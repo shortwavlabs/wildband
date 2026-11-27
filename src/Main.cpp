@@ -778,6 +778,7 @@ private:
         juce::String text = juce::String (wanted != tuned ? "TUNING" : Radio::name (state)) + "  " + stations[(size_t) (wanted != tuned ? wanted : tuned)].name;
         if (instrument.engine.meterStatic.load() > 0.01f) text << "  |  static (synthesized)";
         if (instrument.voice.load() != 0) text << "  |  LAB voice: " << (instrument.voice.load() == 1 ? "Dissolve" : "Dissolve > Resonator");
+        if (instrument.strikeResponse.load() != 0) text << "  |  LAB strike: " << (instrument.strikeResponse.load() == 1 ? "B Fast" : "C Organic");
         if (state == Radio::State::Playing || state == Radio::State::Buffering) text << "  |  " << instrument.radio.detail().upToFirstOccurrenceOf (" - ", false, false) << "  |  buffer " << juce::String (instrument.radio.bufferedSeconds(), 1) << " s";
         else if (instrument.radio.detail().isNotEmpty()) text << "  |  " << instrument.radio.detail();
         if (d.offCentre > 0.0f) text << "  |  off-centre " << juce::roundToInt (d.offCentre * 100.0f) << " %";

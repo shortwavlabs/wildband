@@ -6,8 +6,12 @@ Everything is in **one build**. Monitors down first; nobody has heard any of thi
 open /Users/shortwavlabs/Workspace/shortwavlabs/wildband-integration/build/WILDBAND_artefacts/Release/WILDBAND.app
 ```
 
+This binary is built from the top of the stack: branch `p0/voice-lab` (PR #10), which contains the integration
+candidate (#7), the STRIKE responses (#8), the tuner restart fix (#9) and the voice lab.
+
 It keeps its own settings (`WILDBAND-integration.settings`, started as a copy of your existing setup) and never
-writes the file the four older builds share. With **LAB** left alone it is the integration candidate: your P0
+writes the file the four older builds share. **LAB choices are remembered between launches**; while either is not at
+its default the status line says so ("LAB voice: …", "LAB strike: …"). With **LAB** left alone it is the integration candidate: your P0
 instrument plus per-cable DEPTH, the STRIKE correction and the tuner. The four older builds are still where they
 were. ROOM will ask for the microphone once more (the helper was rebuilt).
 
@@ -48,7 +52,7 @@ behaviour. None of them has a knob, on purpose.
 | Static at different intensities | STATIC 0 / 0.25 / 0.5 / 1, same `>` press each time |
 | Rapid hopping | Hammer `>`; then map it to a Launch Control XL button (MIDI LEARN → click `>` → press the button) |
 | Transitions with strong feedback | FEEDBACK about 0.8, MIX right, then `>` |
-| Fast, slow and failed connections | Real stations are fast. For repeatable slow and failed ones, run the test server and SET these addresses into spare slots |
+| Fast, slow and failed connections | Real stations are fast. For repeatable slow and failed ones, run the test server and SET the addresses below. **SET replaces the station in the current slot and there are no spare slots, so do this in the `scratch` profile** (command above), which leaves your stations alone |
 
 ```bash
 cd /Users/shortwavlabs/Workspace/shortwavlabs/wildband-integration && ffmpeg -v error -y -f lavfi -i "sine=frequency=330:duration=20" -ac 2 -ar 44100 -b:a 128k build/tone.mp3 && python3 -I tools/stream_test_server.py build/tone.mp3
@@ -86,6 +90,16 @@ room. **Treat the Korupt files with suspicion**: the harness may be driving it w
 3. Dissolve: worth pursuing? alone or into the resonators?
 4. From the renders: which candidates deserve a proper port?
 5. "Apply it" for AGPL-3.0-only, and the copyright holder's name for the headers.
+
+## What was measured on this build (muted; technical only)
+
+- `wildband_tests` 831 checks, `wildband_tuner_check` 27 real-time checks, TALORA graph parity: all pass.
+- CoreAudio sweep at defaults ([`evidence/audition-coreaudio-default.md`](evidence/audition-coreaudio-default.md)):
+  radio live in every window, worst callback 4.0 % of the buffer period, no late callbacks.
+- The same sweep with **Dissolve selected** ([`evidence/audition-coreaudio-dissolve.md`](evidence/audition-coreaudio-dissolve.md)):
+  radio live in every window, worst callback 5.5 % (96 kHz / 32), no late callbacks; mean cost about 30 % above
+  the resonator alone. Dissolve → Resonator was not swept.
+- Both sweeps' positive control (a deliberately stalled callback) was detected.
 
 ## Not yet done by anyone
 

@@ -260,6 +260,7 @@ public:
     {
         staticGain = 0.0f;
         dissolve.reset();
+        dissolveHeard = false;
         for (auto& l : lines) std::fill (l.begin(), l.end(), 0.0f);
         for (auto& d : refDelay) std::fill (d.begin(), d.end(), 0.0f);
         lp = {}; dc = {}; svfA = {}; svfB = {}; refLp = {};
@@ -274,6 +275,13 @@ public:
     void process (const float* radioL, const float* radioR, const float* local, float* outL, float* outR, int n, const Controls& c) noexcept
     {
         if (first) { snapControls (c); first = false; }
+
+        // LAB voice housekeeping. Dissolve's history is temporary: once the voice is deselected and has faded out, what
+        // it heard is erased (in pieces, so no single callback pays for it), and it can never be replayed later.
+        const bool labOn = c.voice == 1 || c.voice == 2;
+        if (! labOn && voiceW[1] <= 1.0e-4f && voiceW[2] <= 1.0e-4f) { if (dissolveHeard) dissolveHeard = ! dissolve.forgetSome (16384); }
+        else if (labOn && dissolveHeard && voiceW[1] <= 1.0e-4f && voiceW[2] <= 1.0e-4f && ! dissolveRunning) { dissolve.reset(); }   // re-selected mid-erase: finish at once
+        dissolveRunning = labOn || voiceW[1] > 1.0e-4f || voiceW[2] > 1.0e-4f;
         bool bad = false;
         float peak = 0.0f;
 
@@ -308,11 +316,18 @@ public:
 
             // ---- LAB voice experiment: Dissolve, a rolling granular delay on the same excitation. With the resonator
             // selected (voice 0) none of this runs and every sample below is exactly what it was.
-            const bool lab = c.voice != 0 || voiceW[1] > 1.0e-4f || voiceW[2] > 1.0e-4f;
+            const bool lab = dissolveRunning;
             float dl = 0.0f, dr = 0.0f, exL = xl, exR = xr;
             if (lab)
             {
-                dissolve.process (xl, xr, dl, dr, dissolveP);
+                dissolveHeard = true;
+                dissolveNow.dissolve += aParam * (dissolveP.dissolve - dissolveNow.dissolve);      // smoothed like every other control
+                dissolveNow.spray += aParam * (dissolveP.spray - dissolveNow.spray);
+                dissolveNow.regen += aParam * (dissolveP.regen - dissolveNow.regen);
+                dissolveNow.drive += aParam * (dissolveP.drive - dissolveNow.drive);
+                dissolveNow.time = dissolveP.time;                                                 // (glides inside Dissolve)
+                dissolveNow.damp = damp;
+                dissolve.process (xl, xr, dl, dr, dissolveNow);
                 exL = xl + voiceW[2] * (dl - xl);                          // voice 2: the grains, not the radio, excite the resonators
                 exR = xr + voiceW[2] * (dr - xr);
             }
@@ -530,7 +545,7 @@ private:
 
         // ---- LAB voice: Dissolve borrows the panel. TIME <- PITCH (higher = shorter), DISSOLVE <- SHAPE, SPRAY <- DRIFT,
         // regeneration <- FEEDBACK, damping <- TONE, and the same six control inputs under the same names.
-        for (int m = 0; m < 3; ++m) voiceT[m] = c.voice == m ? 1.0f : 0.0f;
+        for (int m = 1; m < 3; ++m) voiceT[m] = c.voice == m ? 1.0f : 0.0f;
         dissolveP.time = 1.6f * std::exp2 (-5.7f * pt[kPitch] - cpl * cvIn (kResPitchIn));
         dissolveP.dissolve = clamp01 (pt[kShape] + 0.5f * cpl * cvIn (kResShapeIn));
         dissolveP.spray = clamp01 (drift + 0.5f * cpl * cvIn (kResDriftIn));
@@ -579,7 +594,8 @@ private:
     std::array<float, kNumInputs> mod {};   // smoothed value at each resonator input (index 0, the audio input, unused)
     StaticSource tunerStatic;
     Dissolve dissolve;
-    Dissolve::Params dissolveP;
+    Dissolve::Params dissolveP, dissolveNow;
+    bool dissolveHeard = false, dissolveRunning = false;
     float voiceW[3] = {}, voiceT[3] = {};
     float staticGain = 0, staticT = 0, gapSeconds = 0;
     int lastRequest = 0;

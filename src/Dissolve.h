@@ -47,8 +47,21 @@ public:
     {
         for (auto& h : history) std::fill (h.begin(), h.end(), 0.0f);
         for (auto& g : grains) g.remaining = 0;
-        w = 0; countdown = 0; seed = 0x51ED270Bu; delay = -1.0f;
+        w = 0; countdown = 0; seed = 0x51ED270Bu; delay = -1.0f; clearAt = -1;
         last = {}; lowpassed = {};
+    }
+
+    /** Clears the history a piece at a time (for use on the audio thread, where clearing it all at once would be a
+        long call). Returns true once nothing of what it heard is left. Call reset() instead when time does not matter. */
+    bool forgetSome (int samples) noexcept
+    {
+        if (clearAt < 0) { clearAt = 0; for (auto& g : grains) g.remaining = 0; last = {}; lowpassed = {}; countdown = 0; }
+        const int end = std::min (size, clearAt + samples);
+        for (auto& h : history) std::fill (h.begin() + clearAt, h.begin() + end, 0.0f);
+        clearAt = end;
+        if (clearAt < size) return false;
+        clearAt = -1; w = 0; seed = 0x51ED270Bu; delay = -1.0f;
+        return true;
     }
 
     size_t memoryBytes() const noexcept { return sizeof (*this) + 2 * (size_t) size * sizeof (float); }
@@ -122,7 +135,7 @@ private:
     float uniform() noexcept { seed = seed * 1664525u + 1013904223u; return (float) (int32_t) seed * (1.0f / 2147483648.0f); }   // -1 .. 1, deterministic
 
     double fs = 48000;
-    int size = 0, w = 0, countdown = 0;
+    int size = 0, w = 0, countdown = 0, clearAt = -1;
     uint32_t seed = 0;
     float delay = -1.0f, aTime = 0;
     std::array<std::vector<float>, 2> history;

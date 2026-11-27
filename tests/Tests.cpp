@@ -1396,6 +1396,56 @@ void all()
         for (size_t i = 1; i < y.size(); ++i) step = std::max (step, std::abs (y[i] - y[i - 1]));
         CHECK (step < 0.03f);
         CHECK (peak (y) <= Engine::kCeiling && allFinite (y));
+        // knob jumps with a LAB voice selected: no step (Dissolve's parameters are smoothed like the resonator's)
+        Buf x (48000);
+        for (size_t i = 0; i < x.size(); ++i) x[i] = 0.3f * std::sin (2.0f * kPi * 100.0f * (float) i / 48000.0f);
+        for (int v = 1; v < 3; ++v)
+        {
+            auto maxStep = [&] (Controls a, Controls b)
+            {
+                Engine e3;
+                e3.prepare (fs);
+                Buf firstHalf (x.begin(), x.begin() + 24000), secondHalf (x.begin() + 24000, x.end());
+                auto y1 = run (e3, firstHalf, a, 64);
+                const auto y2 = run (e3, secondHalf, b, 64);
+                y1.insert (y1.end(), y2.begin(), y2.end());
+                float m = 0;
+                for (size_t i = 2; i < y1.size(); ++i) m = std::max (m, std::abs (y1[i] - y1[i - 2]));
+                return m;
+            };
+            auto base = defaults();
+            base.voice = v; base.p[kTone] = 0.2f; base.p[kPitch] = 0.1f; base.p[kDrift] = 0.0f; base.p[kCouple] = 0.0f;
+            const float steady = maxStep (base, base);
+            for (int p : { (int) kShape, (int) kTone, (int) kFeedback, (int) kMix, (int) kLevel, (int) kDrift, (int) kCouple })
+                for (float to : { 0.0f, 1.0f })
+                {
+                    auto b = base;
+                    b.p[p] = to;
+                    const float step2 = maxStep (base, b);
+                    CHECK (step2 < steady + 0.03f);
+                    if (step2 >= steady + 0.03f) std::printf ("    voice %d, %s -> %.0f: step %.3f (steady %.3f)\n", v, paramNames[p], (double) to, (double) step2, (double) steady);
+                }
+        }
+
+        currentTest = "DV-07 a deselected Dissolve keeps nothing";
+        {
+            // voice 1 hears noise for a second; voice 0 for three; then voice 1 again. From the moment it is re-selected the
+            // output must be what it would be if Dissolve had never run before - nothing from the first second comes back.
+            const auto loud2 = noise (48000 * 5, 0.4f);
+            auto c2 = defaults();
+            c2.p[kMix] = 1.0f; c2.p[kPitch] = 0.0f;                                   // the longest TIME: 1.6 s
+            Engine used, fresh;
+            used.prepare (fs); fresh.prepare (fs);
+            Buf lu (loud2.size()), ru (loud2.size()), lf (loud2.size()), rf (loud2.size());
+            const Buf zeros (loud2.size(), 0.0f);
+            auto go = [&] (Engine& e4, Buf& l, Buf& r, size_t from, size_t to, int voiceNow, const Buf& in)
+            { auto c4 = c2; c4.voice = voiceNow; for (size_t at = from; at + 64 <= to; at += 64) e4.process (in.data() + at, in.data() + at, zeros.data() + at, l.data() + at, r.data() + at, 64, c4); };
+            go (used, lu, ru, 0, 48000, 1, loud2);       go (fresh, lf, rf, 0, 48000, 0, loud2);
+            go (used, lu, ru, 48000, 192000, 0, loud2);  go (fresh, lf, rf, 48000, 192000, 0, loud2);
+            go (used, lu, ru, 192000, 240000, 1, zeros); go (fresh, lf, rf, 192000, 240000, 1, zeros);
+            CHECK (depth::same (Buf (lu.begin() + 192000, lu.begin() + 239936), Buf (lf.begin() + 192000, lf.begin() + 239936)));
+        }
+
         for (int v = 1; v < 3; ++v)                                                   // each LAB voice makes sound, and PANIC silences it
         {
             Engine e2;
