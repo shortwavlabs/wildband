@@ -3,7 +3,7 @@
 # Copyright (C) 2026 Stephane P. Pericat
 # RECEIVE checks for the BUILT plugin (docs/p1/PLUGIN-RECEIVE.md): starts the local test server with a connection log,
 # points the plugin's stations at it (WILDBAND_TEST_STATIONS), maps a MIDI controller to RECEIVE
-# (WILDBAND_TEST_RECEIVE_CC: a mapping, not an activation), runs the headless checks (RX-10..RX-20) and auval (RX-21),
+# (WILDBAND_TEST_RECEIVE_CC: a mapping, not an activation), runs the headless checks (RX-10..RX-25) and auval (RX-21),
 # and counts every connection. The AU must be installed for this user (~/Library/Audio/Plug-Ins/Components).
 #   tools/run_plugin_lifecycle_check.sh [build-dir]
 #   tools/run_plugin_lifecycle_check.sh --control /path/WILDBAND.vst3
@@ -28,7 +28,7 @@ if [ -n "$CONTROL" ]; then
     "$BUILD/wildband_plugin_check_artefacts/Release/wildband_plugin_check" "vst3=$CONTROL" "lifecycle=$LOG" control=1 2>&1 | grep -v "^JUCE"
     exit $?
 fi
-"$BUILD/wildband_plugin_check_artefacts/Release/wildband_plugin_check" "vst3=$PWD/$BUILD/WILDBAND_Plugin_artefacts/Release/VST3/WILDBAND.vst3" "lifecycle=$LOG" 2>&1 | grep -v "^JUCE" || STATUS=1
+"$BUILD/wildband_plugin_check_artefacts/Release/wildband_plugin_check" "vst3=$PWD/$BUILD/WILDBAND_Plugin_artefacts/Release/VST3/WILDBAND.vst3" "lifecycle=$LOG" "fixtures=$PWD/tests/fixtures/pre-receive-state" 2>&1 | grep -v "^JUCE" || STATUS=1
 
 echo "AudioUnit validation (auval), RX-21: it runs no message loop, so the plugin's timer never fires there; zero below proves nothing about the network (PR #17 positive control)"
 : > "$LOG"

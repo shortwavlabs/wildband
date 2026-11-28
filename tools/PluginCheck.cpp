@@ -6,10 +6,12 @@
 // Logic, Live or any other host behaves.
 //
 //   wildband_plugin_check vst3=/path/WILDBAND.vst3        (the AU is looked up as aumu/Wldb/SwLb in the system)
-//   wildband_plugin_check vst3=... lifecycle=/path/server.log [control=1]
-//        RECEIVE checks RX-10..RX-20 (docs/p1/PLUGIN-RECEIVE.md) against tools/stream_test_server.py started with
+//   wildband_plugin_check vst3=... lifecycle=/path/server.log fixtures=<dir> [control=1]
+//        RECEIVE checks RX-10..RX-25 (docs/p1/PLUGIN-RECEIVE.md) against tools/stream_test_server.py started with
 //        --log, with WILDBAND_TEST_STATIONS pointing at it. control=1 runs only the RX-11 scenario and expects
 //        connections (the positive control, for a build without RECEIVE). Run through tools/run_plugin_lifecycle_check.sh.
+//   wildband_plugin_check vst3=<older build> dumpstate=<dir>
+//        writes that build's VST3 state and the installed AU's state (how tests/fixtures/pre-receive-state was made)
 //
 // The RECEIVE gesture is a MIDI controller: this harness sets WILDBAND_TEST_RECEIVE_CC (unless already set) before
 // loading a plugin, which maps that controller to RECEIVE inside the plugin, as LEARN would. The mapping never
@@ -178,11 +180,26 @@ float render (std::vector<juce::AudioPluginInstance*> ps, double seconds, bool p
 }
 float render (juce::AudioPluginInstance& p, double seconds, bool paced, juce::MidiBuffer first = {}) { return render ({ &p }, seconds, paced, { first }); }
 
-void setOffline (juce::AudioPluginInstance& p, const juce::String& format)
+void setOffline (juce::AudioPluginInstance& p, const juce::String& format, bool offline = true)
 {
-    p.setNonRealtime (true);              // reaches a VST3 as its offline process mode...
+    p.setNonRealtime (offline);           // reaches a VST3 as its offline process mode...
     if (format == "AudioUnit")            // ...but JUCE's AU hosting does not forward it, so set the AU's own property as Logic does for a bounce
-        if (auto* client = p.getAudioUnitClient()) if (auto au = client->getAudioUnitHandle()) { const UInt32 one = 1; AudioUnitSetProperty (au, kAudioUnitProperty_OfflineRender, kAudioUnitScope_Global, 0, &one, sizeof (one)); }
+        if (auto* client = p.getAudioUnitClient()) if (auto au = client->getAudioUnitHandle()) { const UInt32 v = offline ? 1 : 0; AudioUnitSetProperty (au, kAudioUnitProperty_OfflineRender, kAudioUnitScope_Global, 0, &v, sizeof (v)); }
+}
+/** One 512-sample block with this MIDI, and no message-loop pumping: the plugin's timer cannot run in between. */
+void oneBlock (juce::AudioPluginInstance& p, juce::MidiBuffer midi)
+{
+    juce::AudioBuffer<float> buffer (2, 512);
+    buffer.clear();
+    p.processBlock (buffer, midi);
+}
+juce::MidiBuffer panicMidi() { juce::MidiBuffer m; m.addEvent (juce::MidiMessage::allSoundOff (1), 0); return m; }
+juce::File fixtures;        // states saved by the PR #17 build (no RECEIVE mapping fields): tests/fixtures/pre-receive-state
+juce::MemoryBlock fixture (const juce::String& format)
+{
+    juce::MemoryBlock mb;
+    fixtures.getChildFile (format == "VST3" ? "vst3.state" : "au.state").loadFileAsData (mb);
+    return mb;
 }
 void tuneTo (juce::AudioPluginInstance& p, int slot) { for (auto* prm : p.getParameters()) if (prm->getName (16) == "TUNE") prm->setValue (((float) slot + 0.5f) / 6.0f); }
 juce::String str (const Conn& c) { return juce::String (c.opens) + " opened, " + juce::String (c.closes) + " closed"; }
@@ -332,6 +349,83 @@ void lifecycle (juce::AudioPluginFormatManager& fm, const juce::String& format, 
         pump (1.0);
     }
 
+    // RX-22: PANIC and a RECEIVE toggle in the same block, from RECEIVE off: PANIC wins whatever the order in the block
+    for (int order = 0; order < 2; ++order)
+    {
+        auto q = load (fm, format, id, 48000.0, 512);
+        q->prepareToPlay (48000.0, 512);
+        render (*q, 0.5, true);
+        juce::MidiBuffer mb;
+        const int panicAt = order == 0 ? 2 : 0, pressAt = order == 0 ? 0 : 1;
+        mb.addEvent (juce::MidiMessage::controllerEvent (1, receiveCc, 127), pressAt);
+        mb.addEvent (juce::MidiMessage::controllerEvent (1, receiveCc, 0), pressAt + 1);
+        mb.addEvent (juce::MidiMessage::allSoundOff (1), panicAt);
+        t = epoch();
+        render (*q, 3.0, true, mb);
+        check (connections (t).opens == 0, juce::String ("RX-22 ") + (order == 0 ? "toggle then PANIC" : "PANIC then toggle")
+                                               + " in one block, from RECEIVE off: RECEIVE stays off (" + str (connections (t)) + ")");
+        q.reset();
+        pump (0.3);
+    }
+
+    // RX-23: a toggle still pending (the timer has not run) when PANIC or a restore arrives: it must not re-grant RECEIVE
+    for (int k = 0; k < 2; ++k)
+    {
+        auto q = load (fm, format, id, 48000.0, 512);
+        q->prepareToPlay (48000.0, 512);
+        render (*q, 0.5, true);
+        t = epoch();
+        oneBlock (*q, press());                             // queued; no message-loop pass, so not yet applied
+        if (k == 0) oneBlock (*q, panicMidi());             // PANIC in the next block
+        else q->setStateInformation (saved.getData(), (int) saved.getSize());
+        render (*q, 3.0, true);
+        check (connections (t).opens == 0, juce::String ("RX-23 toggle pending, then ") + (k == 0 ? "PANIC in the next block" : "state restore")
+                                               + ": no connection over 3 s (" + str (connections (t)) + ")");
+        q.reset();
+        pump (0.3);
+    }
+
+    // RX-24: the RECEIVE control played during an offline render must not leave an authorisation for real time
+    {
+        auto q = load (fm, format, id, 48000.0, 512);
+        setOffline (*q, format, true);
+        q->prepareToPlay (48000.0, 512);
+        t = epoch();
+        render (*q, 2.0, true, press());
+        q->releaseResources();
+        setOffline (*q, format, false);
+        q->prepareToPlay (48000.0, 512);
+        render (*q, 3.0, true);
+        check (connections (t).opens == 0, "RX-24 RECEIVE pressed during an offline render, then 3 s in real time: " + str (connections (t)));
+        t = epoch();
+        render (*q, 2.0, true, press());
+        check (connections (t).opens == 1, "RX-24 a real-time press afterwards still connects (" + str (connections (t)) + ")");
+        q.reset();
+        pump (0.5);
+    }
+
+    // RX-25: restoring a state saved before RECEIVE existed (PR #17 build: no mapping fields) clears the mapping
+    {
+        const auto old = fixture (format);
+        if (old.isEmpty()) check (false, "RX-25 fixture missing: " + fixtures.getFullPathName());
+        else
+        {
+            auto q = load (fm, format, id, 48000.0, 512);     // constructed with the test mapping (CC 102)
+            q->setStateInformation (old.getData(), (int) old.getSize());
+            q->prepareToPlay (48000.0, 512);
+            render (*q, 0.5, true);
+            t = epoch();
+            render (*q, 3.0, true, press());
+            check (connections (t).opens == 0, "RX-25 after restoring a pre-RECEIVE state, the formerly mapped CC does nothing (" + str (connections (t)) + ")");
+            q->setStateInformation (saved.getData(), (int) saved.getSize());   // a current state carries the mapping again
+            t = epoch();
+            render (*q, 2.0, true, press());
+            check (connections (t).opens == 1, "RX-25 restoring a current state brings the mapping back: one connection (" + str (connections (t)) + ")");
+            q.reset();
+            pump (0.5);
+        }
+    }
+
     int answered = 0, answeredClosed = 0;
     for (const auto& line : juce::StringArray::fromLines (serverLog.loadFileAsString()))
     {
@@ -347,7 +441,7 @@ int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI init;
     juce::String vst3, log;
-    bool control = false;
+    bool control = false, dumpOnly = false;
     if (const char* cc = std::getenv ("WILDBAND_TEST_RECEIVE_CC")) receiveCc = juce::String (cc).getIntValue();
     else setenv ("WILDBAND_TEST_RECEIVE_CC", juce::String (receiveCc).toRawUTF8(), 1);   // read by the plugin when constructed
     for (int i = 1; i < argc; ++i)
@@ -356,9 +450,25 @@ int main (int argc, char** argv)
         if (a.startsWith ("vst3=")) vst3 = a.fromFirstOccurrenceOf ("=", false, false);
         if (a.startsWith ("lifecycle=")) log = a.fromFirstOccurrenceOf ("=", false, false);
         if (a == "control=1") control = true;
+        if (a.startsWith ("fixtures=")) fixtures = juce::File (a.fromFirstOccurrenceOf ("=", false, false));
+        if (a.startsWith ("dumpstate=")) fixtures = juce::File (a.fromFirstOccurrenceOf ("=", false, false)), dumpOnly = true;
     }
     juce::AudioPluginFormatManager fm;
     juce::addDefaultFormatsToManager (fm);
+    if (dumpOnly)   // writes the states of whatever build is given (vst3=) and installed (AU): used once, with the PR #17 build
+    {
+        for (const auto& [format, fid] : { std::pair<juce::String, juce::String> { "VST3", vst3 }, { "AudioUnit", "AudioUnit:Synths/aumu,Wldb,SwLb" } })
+        {
+            auto p = load (fm, format, fid, 48000.0, 512);
+            if (p == nullptr) { std::printf ("could not load %s\n", format.toRawUTF8()); return 1; }
+            juce::MemoryBlock mb;
+            p->getStateInformation (mb);
+            fixtures.createDirectory();
+            fixtures.getChildFile (format == "VST3" ? "vst3.state" : "au.state").replaceWithData (mb.getData(), mb.getSize());
+            std::printf ("%s state: %d bytes\n", format.toRawUTF8(), (int) mb.getSize());
+        }
+        return 0;
+    }
     if (log.isNotEmpty())
     {
         serverLog = juce::File (log);

@@ -42,7 +42,7 @@ public:
         }
         // Test aid (inert unless set): WILDBAND_TEST_RECEIVE_CC=<n> maps controller n to RECEIVE, as if the user had
         // used LEARN, so a headless harness can make the gesture. It maps; it does not activate.
-        if (const char* cc = std::getenv ("WILDBAND_TEST_RECEIVE_CC")) receiveCc = juce::jlimit (-1, 119, juce::String (cc).getIntValue());
+        if (const char* cc = std::getenv ("WILDBAND_TEST_RECEIVE_CC")) mapping.restore (juce::String (cc).getIntValue(), -1);
         startTimerHz (30);
     }
 
@@ -52,10 +52,11 @@ public:
         revoke();       // RECEIVE off, stream cancelled now; Radio's destructor then joins its thread
     }
 
-    // ---- RECEIVE. Any thread except the audio thread.
+    // ---- RECEIVE. Any thread except the audio thread. An explicit setting supersedes MIDI toggles still pending.
     void setReceive (bool on)
     {
         const juce::ScopedLock sl (receiverLock);
+        requests.discardToggles();
         control.setReceive (0, on);
         if (! on) cancelLocked();
     }
@@ -73,12 +74,12 @@ public:
         if (! connected) return "RECEIVE on - waiting for the host to play (no connection)";
         return juce::String (Radio::name (instrument.radio.state())) + "  " + (tuned >= 0 ? stations[(size_t) tuned].name : juce::String());
     }
-    void armReceiveLearn() noexcept { learnReceive = true; }
-    bool learningReceive() const noexcept { return learnReceive.load(); }
+    void armReceiveLearn() noexcept { mapping.armLearn(); }
+    bool learningReceive() const noexcept { return mapping.learning(); }
     juce::String receiveMapping() const
     {
-        if (receiveCc.load() >= 0) return "CC " + juce::String (receiveCc.load());
-        if (receiveNote.load() >= 0) return "note " + juce::String (receiveNote.load());
+        if (mapping.cc() >= 0) return "CC " + juce::String (mapping.cc());
+        if (mapping.note() >= 0) return "note " + juce::String (mapping.note());
         return "no MIDI control";
     }
 
@@ -110,15 +111,19 @@ public:
                 instrument.params[(size_t) i].store (v, std::memory_order_relaxed);
             }
         }
+        const bool offline = isNonRealtime();
+        uint32_t toggles = 0;
+        bool panicSeen = false;
         for (const auto meta : midi)
         {
             const auto m = meta.getMessage();
-            if (receiveMidi (m)) continue;          // RECEIVE learn / toggle and PANIC: requests only, acted on by the timer
+            if (receiveMidi (m, offline, toggles, panicSeen)) continue;   // RECEIVE learn / toggle and PANIC: requests only
             instrument.handleIncomingMidiMessage (nullptr, m);
         }
+        requests.publishBlock (toggles, panicSeen);     // once per block: PANIC in a block outranks every toggle in it
         instrument.renderForHost (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), buffer.getNumSamples());
         lastCallbackMs.store (juce::Time::getMillisecondCounterHiRes(), std::memory_order_relaxed);
-        offlineNow.store (isNonRealtime(), std::memory_order_relaxed);
+        offlineNow.store (offline, std::memory_order_relaxed);
     }
 
     // ---- description
@@ -143,15 +148,20 @@ public:
         juce::XmlElement xml ("WILDBAND");
         xml.setAttribute ("version", 1);
         for (int i = 0; i < kNumParams; ++i) xml.setAttribute (juce::String (paramNames[i]).toLowerCase(), (double) hostParams[(size_t) i]->get());
-        xml.setAttribute ("receiveCc", receiveCc.load());
-        xml.setAttribute ("receiveNote", receiveNote.load());
+        xml.setAttribute ("receiveCc", mapping.cc());
+        xml.setAttribute ("receiveNote", mapping.note());
         copyXmlToBinary (xml, destination);
     }
     void setStateInformation (const void* data, int size) override
     {
-        revoke();       // restoring a state always turns RECEIVE off and cancels any request, including one in flight
+        // Restoring a state always turns RECEIVE off, discards MIDI toggles still pending, and cancels any request,
+        // including one in flight. The RECEIVE mapping is replaced by the state's; a state without mapping fields
+        // (saved before RECEIVE existed, or not a WILDBAND state) leaves no mapping. Either way LEARN is cancelled.
+        revoke();
         const auto xml = getXmlFromBinary (data, size);
-        if (xml == nullptr || ! xml->hasTagName ("WILDBAND")) return;
+        const bool ours = xml != nullptr && xml->hasTagName ("WILDBAND");
+        mapping.restore (ours ? xml->getIntAttribute ("receiveCc", -1) : -1, ours ? xml->getIntAttribute ("receiveNote", -1) : -1);
+        if (! ours) return;
         for (int i = 0; i < kNumParams; ++i)
         {
             const auto id = juce::String (paramNames[i]).toLowerCase();
@@ -161,40 +171,40 @@ public:
             lastHost[(size_t) i] = v;
             hostParams[(size_t) i]->setValueNotifyingHost (v);   // range is 0..1, so normalised = plain
         }
-        if (xml->hasAttribute ("receiveCc")) receiveCc = juce::jlimit (-1, 119, xml->getIntAttribute ("receiveCc", -1));
-        if (xml->hasAttribute ("receiveNote")) receiveNote = juce::jlimit (-1, 127, xml->getIntAttribute ("receiveNote", -1));
     }
 
     Instrument instrument;      // public for the headless check
 
 private:
-    // ---- audio thread: RECEIVE learn, a mapped control's press, and PANIC (CC 120, All Sound Off). Requests only.
-    bool receiveMidi (const juce::MidiMessage& m) noexcept
+    // ---- audio thread: RECEIVE learn, a mapped control's press, and PANIC (CC 120, All Sound Off). It only counts;
+    // processBlock publishes the block's result once. While the host renders offline, the mapped control is consumed
+    // but never counts and LEARN does not capture, so offline MIDI playback can neither grant RECEIVE now nor leave an
+    // authorisation behind for a later real-time pass. PANIC counts offline too: it only ever takes RECEIVE away.
+    bool receiveMidi (const juce::MidiMessage& m, bool offline, uint32_t& toggles, bool& panicSeen) noexcept
     {
-        if (m.isController() && m.getControllerNumber() == 120) { panicRequests.fetch_add (1, std::memory_order_relaxed); return true; }
-        if (learnReceive.load (std::memory_order_relaxed) && (m.isController() || m.isNoteOn()))
+        if (m.isController() && m.getControllerNumber() == 120) { panicSeen = true; return true; }
+        if (! offline && (m.isController() || m.isNoteOn())
+            && mapping.captureLearn (m.isController() ? m.getControllerNumber() : -1, m.isNoteOn() ? m.getNoteNumber() : -1))
         {
-            receiveCc.store (m.isController() ? m.getControllerNumber() : -1);
-            receiveNote.store (m.isNoteOn() ? m.getNoteNumber() : -1);
             lastReceiveCcValue = 127;               // the move that taught it does not also toggle it
-            learnReceive.store (false);
             return true;
         }
-        if (m.isController() && m.getControllerNumber() == receiveCc.load (std::memory_order_relaxed))
+        if (m.isController() && m.getControllerNumber() == mapping.cc())
         {
             const int v = m.getControllerValue();
-            if (v >= 64 && lastReceiveCcValue < 64) toggleRequests.fetch_add (1, std::memory_order_relaxed);
+            if (! offline && v >= 64 && lastReceiveCcValue < 64) ++toggles;
             lastReceiveCcValue = v;
             return true;
         }
-        if (m.isNoteOn() && m.getNoteNumber() == receiveNote.load (std::memory_order_relaxed)) { toggleRequests.fetch_add (1, std::memory_order_relaxed); return true; }
-        if (m.isNoteOff() && m.getNoteNumber() == receiveNote.load (std::memory_order_relaxed)) return true;
+        if (m.isNoteOn() && m.getNoteNumber() == mapping.note()) { if (! offline) ++toggles; return true; }
+        if (m.isNoteOff() && m.getNoteNumber() == mapping.note()) return true;
         return false;
     }
 
     void revoke()
     {
         const juce::ScopedLock sl (receiverLock);
+        requests.discardToggles();      // toggles made before the revocation must not re-grant RECEIVE after it
         control.revokeAll();
         cancelLocked();
     }
@@ -221,9 +231,14 @@ private:
             }
         }
 
-        if (panicRequests.exchange (0) > 0) panic();
         const juce::ScopedLock sl (receiverLock);
-        if ((toggleRequests.exchange (0) & 1) != 0) control.toggleReceive (0);
+        // MIDI requests are taken under the same lock that restore, explicit on/off and PANIC hold, so a toggle can
+        // never be applied after a revocation that came later. A PANIC is applied before any toggle that followed it.
+        if (ReceiveRequests::applyTo (control, requests.take()))
+        {
+            instrument.panic = true;
+            cancelLocked();
+        }
 
         ReceiverControl::HostSnapshot h;
         h.prepared = prepared.load();
@@ -258,9 +273,8 @@ private:
     // host threads / audio thread -> timer (atomics only)
     std::atomic<bool> prepared { false }, preparedOffline { false }, offlineNow { false };
     std::atomic<double> lastCallbackMs { -1.0 }, releasedAtMs { -1.0 };
-    std::atomic<int> toggleRequests { 0 }, panicRequests { 0 };
-    std::atomic<int> receiveCc { -1 }, receiveNote { -1 };
-    std::atomic<bool> learnReceive { false };
+    ReceiveRequests requests;                           // MIDI toggles and PANIC, published once per block (ReceiverControl.h)
+    ReceiveMapping mapping;                             // the control mapped to RECEIVE, and LEARN (ReceiverControl.h)
     int lastReceiveCcValue = 0;                         // audio thread only
 
     // receiver decision state: under receiverLock (never taken by the audio thread)

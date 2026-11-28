@@ -1789,6 +1789,87 @@ void all()
         r.setReceive (7, true);                                                      // out of range: ignored
         CHECK (! r.receiving (7));
     }
+    currentTest = "RX-07 MIDI request ordering: PANIC, restore and explicit off outrank pending toggles";
+    {
+        using Q = ReceiveRequests;
+        // toggle then PANIC in one block, and PANIC then toggle in one block: PANIC wins either way (one publish per block)
+        for (int order = 0; order < 2; ++order)
+        {
+            R r; Q q;
+            r.setReceive (0, true);
+            q.publishBlock (1, true);
+            const auto t = q.take();
+            CHECK (t.panic && t.toggles == 0);
+            CHECK (Q::applyTo (r, t) && ! r.receiving (0));
+        }
+        // a toggle pending from an earlier block, then a PANIC block: the old toggle is discarded
+        {
+            R r; Q q;
+            q.publishBlock (1, false);
+            q.publishBlock (0, true);
+            Q::applyTo (r, q.take());
+            CHECK (! r.receiving (0));
+        }
+        // PANIC block, then a later block's toggle: a new gesture, applied after the PANIC
+        {
+            R r; Q q;
+            q.publishBlock (0, true);
+            q.publishBlock (1, false);
+            const auto t = q.take();
+            CHECK (t.panic && t.toggles == 1);
+            Q::applyTo (r, t);
+            CHECK (r.receiving (0));
+        }
+        // restore / explicit off: pending toggles discarded, so nothing re-grants RECEIVE afterwards
+        {
+            R r; Q q;
+            q.publishBlock (1, false);
+            r.revokeAll(); q.discardToggles();                                       // what restore and RECEIVE off do, under one lock
+            Q::applyTo (r, q.take());
+            CHECK (! r.receiving (0));
+        }
+        // a pending PANIC survives discardToggles (it still runs), and an empty take changes nothing
+        {
+            R r; Q q;
+            r.setReceive (0, true);
+            q.publishBlock (2, false);
+            q.publishBlock (0, true);
+            q.discardToggles();
+            const auto t = q.take();
+            CHECK (t.panic && t.toggles == 0);
+            Q::applyTo (r, t);
+            CHECK (! r.receiving (0));
+            r.setReceive (0, true);
+            CHECK (! Q::applyTo (r, q.take()) && r.receiving (0));
+        }
+        // two toggles cancel; three toggle
+        {
+            R r; Q q;
+            q.publishBlock (2, false); Q::applyTo (r, q.take()); CHECK (! r.receiving (0));
+            q.publishBlock (3, false); Q::applyTo (r, q.take()); CHECK (r.receiving (0));
+        }
+    }
+    currentTest = "RX-08 RECEIVE mapping: a restore always wins, absent fields clear it, LEARN is cancelled";
+    {
+        ReceiveMapping m;
+        CHECK (m.cc() == -1 && m.note() == -1 && ! m.learning());
+        m.restore (102, -1);
+        CHECK (m.cc() == 102 && m.note() == -1);
+        m.armLearn();
+        CHECK (m.learning() && m.cc() == 102);                                      // armed: the old mapping holds until a capture
+        m.restore (-1, -1);                                                          // an older state without mapping fields
+        CHECK (m.cc() == -1 && m.note() == -1 && ! m.learning());
+        CHECK (! m.captureLearn (20, -1) && m.cc() == -1);                         // a capture after the restore cannot land
+        m.armLearn();
+        CHECK (m.captureLearn (-1, 60) && m.note() == 60 && m.cc() == -1 && ! m.learning());
+        CHECK (! m.captureLearn (21, -1) && m.note() == 60);                       // one capture per LEARN
+        m.armLearn();
+        CHECK (m.captureLearn (21, -1));
+        m.restore (5, -1);                                                           // a restore after a capture replaces it
+        CHECK (m.cc() == 5 && m.note() == -1);
+        m.restore (120, 200);                                                        // out of range (CC 120 is PANIC): no mapping
+        CHECK (m.cc() == -1 && m.note() == -1);
+    }
 }
 } // namespace receiveTests
 
