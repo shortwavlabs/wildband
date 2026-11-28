@@ -37,23 +37,48 @@ A receiver holds a connection **iff** it is authorised **and** the host is live.
 not offline, an audio callback within the last 0.5 s (no waiting window), and not in the 5 s idle or 0.5 s release
 grace states inherited from PR #17. Written for an array of receivers; the plugin uses receiver 0 until receiver B exists.
 
-### Thread ownership (audit result)
+### Thread ownership (final implementation, reconciled after review)
 
-| Datum | Writers | Readers | Before | After |
-|---|---|---|---|---|
-| Sample rate used by the timer | `prepareToPlay` (host thread, unspecified) | message-thread timer | **plain `double` — a data race** | `std::atomic<double>` |
-| Prepare / release events | host threads | timer | small queue under a `SpinLock`, also taken by a host thread that may be the audio thread | **wait-free**: atomic counters and flags (`prepared`, `preparedOffline`, `releaseCount`, release time); the timer derives transitions |
-| Rendered samples, last callback time, offline flag | audio thread | timer | atomics | unchanged |
-| RECEIVE requests | editor (message thread), MIDI (audio thread, via `processBlock`) | timer | — | atomic request counter + desired value; never acted on from the audio thread |
-| Revocation from `setStateInformation` / destructor / PANIC | host threads, message thread | — | — | under `receiverLock` (a `CriticalSection` never taken by the audio thread), which the timer also holds while it decides and issues receiver requests — so a timer that read "authorised" cannot open a connection after a revocation |
-| Station requests (`Radio::tune` / `resume`) | timer, revokers | receiver thread | already lock-protected inside `Radio` | always under `receiverLock` first, then `Radio`'s lock (one order everywhere) |
+PR #17 had a race (a plain `double` sample rate shared by `prepareToPlay` and the timer) and a `SpinLock`
+event queue a host thread could take. Both are gone.
+
+| Datum | Writers | Readers | Mechanism |
+|---|---|---|---|
+| Sample rate | — | — | no longer shared: the timer does not need it (the PR #17 race is removed, not wrapped) |
+| Prepared / prepared offline / release time (`prepared`, `preparedOffline`, `releasedAtMs`) | `prepareToPlay`, `releaseResources` (host threads, unspecified) | timer | `std::atomic` stores only; the timer derives the host state from them (`ReceiverControl::updateHost`) |
+| Last callback time, offline now (`lastCallbackMs`, `offlineNow`) | audio thread | timer | relaxed atomics, written at the end of each block |
+| MIDI RECEIVE toggles and PANIC (`ReceiveRequests`) | audio thread, once per block | timer | **one** atomic word: PANIC flag + toggles counted after the latest PANIC. The audio thread never acts on it. The timer takes it, and restore / explicit on/off / PANIC discard pending toggles, only under `receiverLock` |
+| RECEIVE mapping and LEARN (`ReceiveMapping`) | LEARN capture (audio thread), restore and test aid (any non-audio thread), LEARN arm (editor) | audio thread, editor, `getStateInformation` | **one** atomic word: CC, note, LEARN flag. A restore stores a whole word, so it always wins; a capture uses compare-and-swap and lands only while LEARN is armed |
+| Authorisation and connection state (`ReceiverControl`, `connected`, `tuned`) | timer, editor (`setReceive`), restore, destructor, PANIC | timer, editor status | under `receiverLock`, a `CriticalSection` the audio thread never takes. The timer holds it while it applies MIDI requests, decides and issues station requests, so nothing authorised before a revocation can connect after it |
+| Station requests (`Radio::tune` / `resume`) | timer, revokers | receiver thread | always `receiverLock` first, then `Radio`'s own lock (one order everywhere); never called from `processBlock` |
 
 ### MIDI
 
 A control is mapped to RECEIVE deliberately: editor → LEARN, then move a control (CC or note). The mapping is
 configuration and is saved; **activation is not**. A mapped control toggles RECEIVE on a press (CC rising through 64,
-or note-on). MIDI CC 120 (All Sound Off) acts as PANIC. A test aid, `WILDBAND_TEST_RECEIVE_CC=<n>`, maps CC *n* to
-RECEIVE at construction so the headless harness can make the gesture; it maps, it does not activate.
+or note-on). MIDI CC 120 (All Sound Off) acts as PANIC, and cannot itself be mapped. A test aid,
+`WILDBAND_TEST_RECEIVE_CC=<n>`, maps CC *n* to RECEIVE at construction so the headless harness can make the gesture.
+It maps; it does not activate.
+
+### Authorisation ordering (narrow audit after the PR #19 review)
+
+The review found four gaps in the first version. The rules below close them; each is tested (RX-07, RX-08,
+RX-22..RX-25):
+
+1. **PANIC outranks toggles.** A PANIC anywhere in an audio block discards every RECEIVE toggle in that block,
+   whatever their order within it, and every toggle still pending from earlier blocks. Toggles in later blocks are
+   new gestures and count. The precedence is deterministic because the audio thread publishes one word per block.
+2. **Restore and explicit RECEIVE off/on supersede pending toggles.** They discard them under `receiverLock`, the
+   lock under which the timer takes requests. A toggle made before a restore, PANIC or explicit setting can therefore
+   never re-grant RECEIVE after it. (Before the fix, the timer ran PANIC and then applied pending toggles, and toggles
+   survived a restore.)
+3. **Offline MIDI cannot authorise.** While the host renders offline, the mapped control is consumed but never
+   counts, and LEARN does not capture. An offline bounce that plays the mapped control neither connects (RX-18) nor
+   leaves an authorisation behind for the next real-time pass (RX-24). PANIC still counts offline; it can only take
+   RECEIVE away.
+4. **Restore replaces the mapping.** A state's `receiveCc` / `receiveNote` become the mapping. A state without these
+   fields (saved before RECEIVE existed, or not a WILDBAND state) leaves **no** mapping. Either way a pending LEARN is
+   cancelled, and a LEARN capture still in progress cannot land after the restore.
 
 ## Acceptance criteria (registered before implementation)
 
@@ -78,6 +103,18 @@ Bundle (`wildband_plugin_check` + counting server; both formats):
 | RX-20 | PANIC (CC 120) while receiving: closed, RECEIVE off |
 | RX-21 | Unchanged: `auval` succeeds (its network evidence still proves nothing, see PR #17); frozen parameter order; the general headless checks |
 
+**Added after the review** (ordering audit; not pre-registered, so each has a negative control against the
+first version):
+
+| ID | Passes when |
+|---|---|
+| RX-07 (unit) | `ReceiveRequests`: PANIC in a block outranks the block's toggles in either order; earlier pending toggles are discarded by a PANIC block, a restore or an explicit setting; a pending PANIC survives `discardToggles`; toggles after a PANIC block count |
+| RX-08 (unit) | `ReceiveMapping`: restore without fields clears the mapping and LEARN; a capture after a restore cannot land; one capture per LEARN; out-of-range values (CC 120, note 200) map nothing |
+| RX-22 | From RECEIVE off, a press and CC 120 in one block, in either order: 0 connections |
+| RX-23 | A press in one block, then before any timer pass a CC 120 block or a state restore: 0 connections over 3 s |
+| RX-24 | A press during an offline render, then 3 s in real time: 0 connections; a real-time press afterwards: 1 |
+| RX-25 | Restoring a pre-RECEIVE state (`tests/fixtures/pre-receive-state`, saved by the PR #17 build) into an instance mapped to CC 102: that CC does nothing over 3 s; restoring a current state brings the mapping back (1 connection) |
+
 Not established by any of this: what Logic and Live do; how the temporary editor feels.
 
 ## Results (2026-11-27, this branch, Apple Silicon, macOS 26)
@@ -88,9 +125,10 @@ Commands: `build/wildband_tests`, `tools/run_plugin_lifecycle_check.sh build`, `
 
 | Check | Result |
 |---|---|
-| RX-01..RX-06 | pass (part of 949 engine checks, 0 failed) |
+| RX-01..RX-08 | pass (part of 972 engine checks, 0 failed; RX-07/RX-08 added after the review) |
+| RX-22..RX-25, VST3 and AU (ordering audit) | 16 of 16 pass. **Negative control:** the same harness against the first version's `Plugin.cpp` (79f0886) fails 14 of 16. RX-22 (both orders), RX-23 (PANIC and restore), RX-24 and RX-25 each opened a connection there; the 2 that pass there are RX-25's positive half. Full RX run after the fix: 52 of 52 plus auval (docs/p1/evidence/plugin-receive-check.txt) |
 | RX-11 positive control (PR #17 build, same scenario) | VST3 1 connection, AU 1 connection: the scenario detects a build that connects without RECEIVE |
-| RX-10..RX-20, VST3 and AU | 36 of 36 pass (docs/p1/evidence/plugin-receive-check.txt). RX-11: 0 connections over 10 s of real-time rendering with notes played. RX-12: first connection 0.02-0.03 s after the gesture. RX-13: closed 5.3 s after callbacks stopped, reconnected on resume with no gesture. RX-16 restore took < 1 ms and closed the stream. RX-17 off / restore / destroy mid-connect: no later connection, destroy < 10 ms. RX-19: one connection per receiving instance, destroying one closed only its own |
+| RX-10..RX-20, VST3 and AU | 36 of 36 pass (first version; still passing after the ordering fix). RX-11: 0 connections over 10 s of real-time rendering with notes played. RX-12: first connection 0.02-0.03 s after the gesture. RX-13: closed 5.3 s after callbacks stopped, reconnected on resume with no gesture. RX-16 restore took < 1 ms and closed the stream. RX-17 off / restore / destroy mid-connect: no later connection, destroy < 10 ms. RX-19: one connection per receiving instance, destroying one closed only its own |
 | RX-21 | auval: AU VALIDATION SUCCEEDED; 0 connections counted, 0 remote TCP seen. As in PR #17 this zero proves nothing: auval pumps no message loop, so the timer that makes requests never runs there |
 | General headless checks | 24 of 24 (frozen order in both formats). The 6 s real-time check now makes the RECEIVE gesture and then reaches the default (real) stations |
 | Tuner real-time checks | 28 of 28, including RL-23 (resume is not a retune) |

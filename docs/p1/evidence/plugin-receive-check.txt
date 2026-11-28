@@ -1,27 +1,35 @@
 VST3 RECEIVE
   pass  RX-10 scan-like x3, prepare/release, fast rendering, offline rendering, restore + real time: 0 opened, 0 closed
   pass  RX-11 monitored project, 10 s in real time with notes played, no RECEIVE: 0 opened, 0 closed
-  pass  RX-12 RECEIVE (mapped CC) while rendering: 1 opened, 0 closed, first 0.03 s after the gesture (limit 0.6); sound (peak 0.010)
-  pass  RX-13 callbacks stop: closed 5.28 s later (1 opened, 1 closed)
+  pass  RX-12 RECEIVE (mapped CC) while rendering: 1 opened, 0 closed, first 0.06 s after the gesture (limit 0.6); sound (peak 0.010)
+  pass  RX-13 callbacks stop: closed 5.32 s later (1 opened, 1 closed)
   pass  RX-13 callbacks resume: reconnected without a new gesture (1 opened, 0 closed)
   pass  RX-14 RECEIVE off: closed, nothing new over 3 s of rendering (0 opened, 1 closed)
   pass  RX-15 five on/off cycles: 5 opened, 5 closed
-  pass  RX-16 restore while receiving: closed, RECEIVE off, no reconnection over 3 s (0 opened, 1 closed; restore took 0.5 ms)
+  pass  RX-16 restore while receiving: closed, RECEIVE off, no reconnection over 3 s (0 opened, 1 closed; restore took 0.6 ms)
   pass  RX-16 after restore, a new gesture connects again (1 opened, 0 closed)
   pass  RX-20 PANIC (CC 120) while receiving: closed, RECEIVE off, nothing over 3 s (0 opened, 1 closed)
   pass  RX-17 mid-connect to a silent server, then RECEIVE off: no later connection (1 opened)
-  pass  RX-17 mid-connect to a silent server, then restore: returned in 0.3 ms, no later connection (1 opened)
-  pass  RX-17 mid-connect to a silent server, then destroy: returned in 8.9 ms, no later connection (1 opened)
+  pass  RX-17 mid-connect to a silent server, then restore: returned in 0.6 ms, no later connection (1 opened)
+  pass  RX-17 mid-connect to a silent server, then destroy: returned in 10.3 ms, no later connection (1 opened)
   pass  RX-18 RECEIVE during an offline render (paced, 4 s): 0 opened, 0 closed
   pass  RX-19 two instances, RECEIVE on one: 1 opened, 0 closed
   pass  RX-19 RECEIVE on the second as well: one more (1 opened, 0 closed)
   pass  RX-19 destroying the first closes only its own (0 opened, 1 closed)
-  pass  no stream connection left open overall (11 opened, 11 closed)
+  pass  RX-22 toggle then PANIC in one block, from RECEIVE off: RECEIVE stays off (0 opened, 0 closed)
+  pass  RX-22 PANIC then toggle in one block, from RECEIVE off: RECEIVE stays off (0 opened, 0 closed)
+  pass  RX-23 toggle pending, then PANIC in the next block: no connection over 3 s (0 opened, 0 closed)
+  pass  RX-23 toggle pending, then state restore: no connection over 3 s (0 opened, 0 closed)
+  pass  RX-24 RECEIVE pressed during an offline render, then 3 s in real time: 0 opened, 0 closed
+  pass  RX-24 a real-time press afterwards still connects (1 opened, 0 closed)
+  pass  RX-25 after restoring a pre-RECEIVE state, the formerly mapped CC does nothing (0 opened, 0 closed)
+  pass  RX-25 restoring a current state brings the mapping back: one connection (1 opened, 0 closed)
+  pass  no stream connection left open overall (13 opened, 13 closed)
 AudioUnit RECEIVE
   pass  RX-10 scan-like x3, prepare/release, fast rendering, offline rendering, restore + real time: 0 opened, 0 closed
   pass  RX-11 monitored project, 10 s in real time with notes played, no RECEIVE: 0 opened, 0 closed
   pass  RX-12 RECEIVE (mapped CC) while rendering: 1 opened, 0 closed, first 0.02 s after the gesture (limit 0.6); sound (peak 0.010)
-  pass  RX-13 callbacks stop: closed 5.27 s later (1 opened, 1 closed)
+  pass  RX-13 callbacks stop: closed 5.28 s later (1 opened, 1 closed)
   pass  RX-13 callbacks resume: reconnected without a new gesture (1 opened, 0 closed)
   pass  RX-14 RECEIVE off: closed, nothing new over 3 s of rendering (0 opened, 1 closed)
   pass  RX-15 five on/off cycles: 5 opened, 5 closed
@@ -30,13 +38,21 @@ AudioUnit RECEIVE
   pass  RX-20 PANIC (CC 120) while receiving: closed, RECEIVE off, nothing over 3 s (0 opened, 1 closed)
   pass  RX-17 mid-connect to a silent server, then RECEIVE off: no later connection (1 opened)
   pass  RX-17 mid-connect to a silent server, then restore: returned in 0.2 ms, no later connection (1 opened)
-  pass  RX-17 mid-connect to a silent server, then destroy: returned in 5.2 ms, no later connection (1 opened)
+  pass  RX-17 mid-connect to a silent server, then destroy: returned in 4.7 ms, no later connection (1 opened)
   pass  RX-18 RECEIVE during an offline render (paced, 4 s): 0 opened, 0 closed
   pass  RX-19 two instances, RECEIVE on one: 1 opened, 0 closed
   pass  RX-19 RECEIVE on the second as well: one more (1 opened, 0 closed)
   pass  RX-19 destroying the first closes only its own (0 opened, 1 closed)
-  pass  no stream connection left open overall (22 opened, 22 closed)
-36 checks, 0 failed
+  pass  RX-22 toggle then PANIC in one block, from RECEIVE off: RECEIVE stays off (0 opened, 0 closed)
+  pass  RX-22 PANIC then toggle in one block, from RECEIVE off: RECEIVE stays off (0 opened, 0 closed)
+  pass  RX-23 toggle pending, then PANIC in the next block: no connection over 3 s (0 opened, 0 closed)
+  pass  RX-23 toggle pending, then state restore: no connection over 3 s (0 opened, 0 closed)
+  pass  RX-24 RECEIVE pressed during an offline render, then 3 s in real time: 0 opened, 0 closed
+  pass  RX-24 a real-time press afterwards still connects (1 opened, 0 closed)
+  pass  RX-25 after restoring a pre-RECEIVE state, the formerly mapped CC does nothing (0 opened, 0 closed)
+  pass  RX-25 restoring a current state brings the mapping back: one connection (1 opened, 0 closed)
+  pass  no stream connection left open overall (26 opened, 26 closed)
+52 checks, 0 failed
 AudioUnit validation (auval), RX-21: it runs no message loop, so the plugin's timer never fires there; zero below proves nothing about the network (PR #17 positive control)
   pass  RX-21 auval: AU VALIDATION SUCCEEDED
   pass  RX-21 auval opened 0 connections to the counting server
